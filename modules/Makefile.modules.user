@@ -1,12 +1,10 @@
-# Slim EOS M module set (crop_rec RAW workflow)
-# mlv_lite must build before mlv_play and mlv_snd (checkdep)
+# Bolex EOS M module set (crop_rec RAW workflow, no sound, no HDMI)
+# mlv_lite must build before mlv_play (checkdep)
 # file_man: required by mlv_play; File Manager tab hidden in slim UI
 ML_MODULES = \
 	mlv_lite \
 	crop_rec \
-	hdmi_out \
 	mlv_play \
-	mlv_snd \
 	sd_uhs \
 	file_man \
 	bench

@@ -6986,6 +6986,10 @@ static void close_canon_menu()
 
 static void menu_open() 
 { 
+#ifdef CONFIG_BOLEX
+    /* the Bolex has no ML menu: every way of opening it ends here */
+    return;
+#endif
     if (menu_shown) return;
 
 #ifdef CONFIG_SLIM_MENUS

@@ -253,6 +253,12 @@ static int bpp_digital_gain()
         return 14;
     }
 
+    /* Bolex 4:3 (Canon's x1 mode): fixed 10-bit */
+    if (bolex_format() == 2)
+    {
+        return 10;
+    }
+
     if (output_format == OUTPUT_12BIT_LOSSLESS)
     {
         return 12;
@@ -308,6 +314,13 @@ static int default_height_720p = 0;
 
 static int raw_digital_gain_ok()
 {
+    /* Bolex 4:3 is Canon's own x1 mode (1808x727 raw with borders, one line over the
+     * default_height guess below): digital gain is fine there */
+    if (bolex_format() == 2 && !crop_rec_is_enabled() && output_format > OUTPUT_14BIT_LOSSLESS)
+    {
+        return 1;
+    }
+
     if (output_format > OUTPUT_14BIT_LOSSLESS)
     {
         /* fixme: not working in modes with higher resolution */
@@ -1005,6 +1018,16 @@ void update_resolution_params()
     /* res Y */
     int num = aspect_ratio_presets_num[aspect_ratio_index];
     int den = aspect_ratio_presets_den[aspect_ratio_index];
+
+    /* Bolex 4:3: Canon's x1 view reads 3x5, so 1536 wide and ~692 high gives 4:3 once
+     * stretched 5/3 vertically (the RAWC block in the file says so) */
+    if (bolex_format() == 2 && squeeze_factor != 1.0f)
+    {
+        res_x = MIN(1536, max_res_x);
+        num = 4;
+        den = 3;
+    }
+
     res_y = calc_res_y(res_x, max_res_y, num, den, squeeze_factor);
 
     /* Film Format override (square pixels only) */
@@ -2459,10 +2482,28 @@ void show_recording_status()
     }
 }
 
+/* Bolex: the RAW recorder settings it keeps fixed (there is no menu to change them) */
+static void bolex_raw_settings(void)
+{
+    if (!bolex_format() || !RAW_IS_IDLE)
+        return;
+
+    raw_video_enabled = 1;
+    output_format = OUTPUT_AUTO_BIT_LOSSLESS;   /* lossless; 10-bit comes from crop_rec (16:9) or bpp_digital_gain (4:3) */
+    pre_record = 0;
+    rec_trigger = 0;
+    dolly_mode = 0;
+    h264_proxy_menu = 0;
+    card_spanning = 0;
+    film_format_index = 0;
+}
+
 static REQUIRES(ShootTask) EXCLUDES(settings_sem)
 unsigned int raw_rec_polling_cbr(unsigned int unused)
 {
     if (!compress_mq) return 0;
+
+    bolex_raw_settings();
 
     static int lvrecov_aux = INT_MIN;
     if (should_run_polling_action(100, &lvrecov_aux))

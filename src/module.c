@@ -43,7 +43,12 @@ CONFIG_INT("module.console", module_console_enabled, 0);
 CONFIG_INT("module.ignore_crashes", module_ignore_crashes, 0);
 char *module_lockfile = MODULE_PATH"LOADING.LCK";
 
+#ifdef CONFIG_BOLEX
+/* the Bolex loads its own modules and nothing else, even if older ones are left on the card */
+char *core_modules[] = {"mlv_lite", "crop_rec", "mlv_play", "sd_uhs", "file_man", "bench"};
+#else
 char *core_modules[] = {"mlv_lite", "crop_rec", "mlv_play", "mlv_snd", "sd_uhs", "lua", "file_man", "dual_iso", "silent", "bench", "hdmi_out"};
+#endif
 
 static struct msg_queue * module_mq = 0;
 // #define MSG_MODULE_LOAD_ALL 1
@@ -273,7 +278,11 @@ static void _module_load_all(uint32_t list_only)
             }
             
             /* if enable-file is nonexistent, dont load module, unless it's a core module */
+#ifdef CONFIG_BOLEX
+            if (index_in_core_modules >= core_modules_count)
+#else
             if(!config_flag_file_setting_load(enable_file) && index_in_core_modules >= core_modules_count)
+#endif
             {
                 module_list[module_cnt].enabled = 0;
                 module_list[module_cnt].is_core = 0;

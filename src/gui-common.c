@@ -663,6 +663,42 @@ static void slim_info_lp_release(int fire_short)
         fake_simple_button(BGMT_INFO);
 }
 
+#ifdef CONFIG_BOLEX
+/* 1 once Canon has sent an INFO release (crop_rec shows it; the EOS M may never send one) */
+int bolex_info_unpress_seen = 0;
+
+/* Movie Live View: the touchscreen does nothing (no Quick Panel, editors or touch AF) */
+static int handle_bolex_keys(struct event * event)
+{
+#ifdef BGMT_UNPRESS_INFO
+    if (event->param == BGMT_UNPRESS_INFO)
+        bolex_info_unpress_seen = 1;
+#endif
+
+    if (!lv || !is_movie_mode() || gui_menu_shown())
+        return 1;
+
+    switch (event->param)
+    {
+        case BGMT_TOUCH_1_FINGER:
+        case BGMT_UNTOUCH_1_FINGER:
+        case BGMT_TOUCH_2_FINGER:
+        case BGMT_UNTOUCH_2_FINGER:
+#ifdef BGMT_TOUCH_MOVE
+        case BGMT_TOUCH_MOVE:
+#endif
+#ifdef BGMT_TOUCH_PINCH_START
+        case BGMT_TOUCH_PINCH_START:
+#endif
+#ifdef BGMT_TOUCH_PINCH_STOP
+        case BGMT_TOUCH_PINCH_STOP:
+#endif
+            return 0;
+    }
+    return 1;
+}
+#endif
+
 static int handle_slim_info_longpress(struct event * event)
 {
     /* Fake INFO is our short-press re-inject — never re-arm. */
@@ -1161,11 +1197,18 @@ int handle_common_events_by_feature(struct event * event)
     if (event->param != GMT_OLC_INFO_CHANGED)
         last_time_active = get_seconds_clock();
 
+#ifdef CONFIG_BOLEX
+    if (handle_bolex_keys(event) == 0) return 0;
+#endif
+
 #ifdef CONFIG_SLIM_MENUS
     if (!menu_white_card_wb_handle_key(event->param, IS_FAKE(event))) return 0;
     if (handle_slim_rec_touch_block(event) == 0) return 0;
     if (handle_slim_lv_editor_keys(event) == 0) return 0;
+#ifndef CONFIG_BOLEX
+    /* the Bolex owns INFO (crop_rec.c) */
     if (handle_slim_info_longpress(event) == 0) return 0;
+#endif
 #endif
 
     /* convert Q replacement events into BGMT_Q */

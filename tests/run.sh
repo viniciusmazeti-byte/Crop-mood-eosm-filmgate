@@ -30,6 +30,12 @@ CR=modules/crop_rec/crop_rec.c
   python3 tests/extract.py $CR function slim_crop_fps_mask
 } > "$OUT/crop_rec_menu_snippets.h"
 python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_snippet.h"
+# the Bolex shutter correction (tests/bolex_tests.c)
+{
+  python3 tests/extract.py $CR line     "#define BOLEX_FPS_X1000"
+  python3 tests/extract.py $CR line     "#define BOLEX_SHUTTER_X1000"
+  python3 tests/extract.py $CR function bolex_shutter_steps
+} > "$OUT/bolex_snippets.h"
 
 # 2. structure check: the film table exists once, in src/film-formats.h only
 if grep -n '"Super 8 Actual"\|"A35 Anamorphic 2x"' modules/crop_rec/crop_rec.c modules/mlv_lite/mlv_lite.c; then
@@ -37,7 +43,7 @@ if grep -n '"Super 8 Actual"\|"A35 Anamorphic 2x"' modules/crop_rec/crop_rec.c m
 fi
 
 # 3. build and run
-for t in film settings menu gain ltc; do
+for t in film settings menu gain ltc bolex; do
   echo "== $t"
   gcc $CF -o "$OUT/$t" tests/${t}_tests.c -lm
   "$OUT/$t"

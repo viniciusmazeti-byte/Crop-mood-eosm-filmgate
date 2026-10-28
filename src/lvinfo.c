@@ -207,6 +207,11 @@ void lvinfo_add_items(struct lvinfo_item * items, int count)
     if (lvinfo_sem) take_semaphore(lvinfo_sem, 0);
     for (int i = 0; i < count && _info_items_count < MAX_ITEMS; i++)
     {
+#ifdef CONFIG_BOLEX
+        /* the Bolex screen shows one line of its own (crop_rec.c) and nothing else */
+        if (!items[i].name || strncmp(items[i].name, "Bolex", 5) != 0)
+            continue;
+#endif
         _info_items[_info_items_count] = &items[i];
         _info_items_count++;
     }

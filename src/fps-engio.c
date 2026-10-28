@@ -953,6 +953,34 @@ static void fps_change_value(void* priv, int delta)
     if (get_fps_override()) fps_needs_updating = 1;
 }
 
+#ifdef CONFIG_BOLEX
+/* Bolex: crop_rec turns the FPS override on, at one rate, or off; there is no FPS menu.
+ * "Low light" keeps Canon's timer A (so the line time and rolling shutter stay native) and
+ * keeps the shutter angle.  Called often: only a real change asks for an update. */
+void fps_override_force(int enable, int fps_x1000)
+{
+    int idx = fps_override_index;
+    for (int i = 0; i < COUNT(fps_values_x1000); i++)
+        if (fps_values_x1000[i] == fps_x1000)
+            idx = i;
+
+    enable = enable ? 1 : 0;
+    if (fps_override == enable && (!enable || (fps_override_index == idx && fps_criteria == 0)))
+        return;
+
+    fps_override_index = idx;
+    fps_criteria = 0;
+    desired_fps_timer_a_offset = 0;
+    desired_fps_timer_b_offset = 0;
+#ifdef FEATURE_FPS_RAMPING
+    fps_ramp = 0;
+#endif
+    fps_sync_shutter = 0;
+    fps_override = enable;
+    fps_needs_updating = 1;
+}
+#endif
+
 static void fps_enable_disable(void* priv, int delta)
 {
     #ifdef FEATURE_FPS_OVERRIDE

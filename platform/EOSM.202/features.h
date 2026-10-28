@@ -48,5 +48,7 @@
 
 /* Slim UI: crop_rec RAW workflow only */
 #define CONFIG_SLIM_MENUS
+/* Bolex: no ML menu, no touch shortcuts, one info line (see crop_rec.c, "Bolex") */
+#define CONFIG_BOLEX
 #undef FEATURE_EXPO_LOCK
 #undef FEATURE_EXPO_PRESET
