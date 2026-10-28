@@ -6965,6 +6965,10 @@ static void bolex_step(void)
         return;
 #endif
 
+    /* x10 is for focusing only: exposure is set and checked in the normal view */
+    if (lv_dispsize == 10)
+        return;
+
     static int last_expo = 0;
     int now = get_ms_clock();
     if (now - last_expo < 1000)
