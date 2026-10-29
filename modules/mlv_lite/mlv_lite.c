@@ -2656,6 +2656,12 @@ int is_more_hacks_selected()
     return 0;
 }
 
+/* Bolex info line (crop_rec.c): frames captured in the take being recorded, 0 when idle */
+int mlv_lite_recorded_frames(void)
+{
+    return RAW_IS_RECORDING ? frame_count : 0;
+}
+
 void mlv_lite_set_small_hacks_more(void)
 {
     if (small_hacks < 2)

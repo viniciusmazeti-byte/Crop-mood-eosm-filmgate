@@ -6878,10 +6878,8 @@ extern void fps_override_force(int enable, int fps_x1000);
 extern int bolex_shutter_clicks;
 /* src/gui-common.c (Bolex core): Up / Down arrow steps not yet applied, + = higher ISO */
 extern int bolex_iso_clicks;
-/* src/histogram.c: the ML histogram (on, Luma (YUV), linear - as in the user's crop mood) */
+/* src/histogram.c: the ML histogram, kept off */
 extern int hist_draw;
-extern int hist_type;
-extern int hist_log;
 
 /* ISO choices on the Up / Down arrows */
 static const int bolex_isos[] = { ISO_100, ISO_200, ISO_400 };
@@ -6959,10 +6957,8 @@ static void bolex_fixed_settings(void)
         raw_invalidate_lv_calibration();
     }
 
-    /* the histogram: on, Luma (YUV), linear */
-    hist_draw = 1;
-    hist_type = 0;
-    hist_log = 0;
+    /* no histogram (tried on: not wanted) */
+    hist_draw = 0;
 
     /* buttons: nothing remapped, INFO belongs to the Bolex */
     INFO_button = 0;
@@ -7077,6 +7073,23 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     int canon_us = lens_info.raw_shutter ? (int)(raw2shutterf(lens_info.raw_shutter) * 1000000) : 0;
     int exp_us = bolex_exposure_us(canon_us, fps);
     int angle = (int)((int64_t) exp_us * fps * 360 / 1000000000LL);
+
+    /* recording: the time filmed so far, in red (mlv_lite's own status is not on this screen) */
+    if (RECORDING)
+    {
+        int frames = mlv_lite_recorded_frames();
+        int secs = fps > 0 ? (int)((int64_t) frames * 1000 / fps) : 0;
+        snprintf(buffer, 64, "REC %d:%02d   %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d",
+            secs / 60, secs % 60,
+            fps / 1000, fps % 1000,
+            BOLEX_PLAY_FPS,
+            exp_us > 0 ? (1000000 + exp_us / 2) / exp_us : 0,
+            angle,
+            lens_info.iso);
+        item->color_bg = COLOR_RED;
+        item->color_fg = COLOR_WHITE;
+        return;
+    }
 
     snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT",
         fps / 1000, fps % 1000,
