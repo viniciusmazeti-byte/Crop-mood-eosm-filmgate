@@ -116,6 +116,14 @@ static int crop_preset_fps = 0;
 #define Framerate_48   (crop_preset_fps == 5)   /* slim A35 frames that fit in a short readout (see update_patch) */
 static int a35_short_readout = 0;   /* 48 fps on A35 16:9 / 1.85: 1736x958 readout (set in update_patch) */
 
+/* Bolex (see the "Bolex" section further down): the sensor reading in use */
+#define BOLEX_4_3           2   /* 3x5, Canon x1 */
+#define BOLEX_4_3_X7        3   /* 3x7, crop_rec 3x3 preset */
+#define BOLEX_X7_ROWS       496 /* lines read in 3x7: 496 * 7 = 3472 sensor lines, the full height */
+static int bolex_fmt = 0;       /* 0 until crop_rec_init has applied the saved one */
+/* the 3x3 preset reads 1 line of 7 (register overrides, raw geometry) */
+#define BOLEX_SKIP7 (bolex_fmt == BOLEX_4_3_X7)
+
 /* customized buttons variables
  * EOS M slim defaults:
  *   SET = Zoom x10; U/D = ISO; L/R = Aperture; INFO off.
@@ -1373,7 +1381,8 @@ static void FAST adtg_hook(uint32_t* regs, uint32_t* stack, uint32_t pc)
                 case CROP_PRESET_3X3:
                 if (is_EOSM)
                 {
-                    adtg_new[2] = (struct adtg_new) {2, 0x800C, 0x2};
+                    /* Bolex 3x7: 6 = read 1 line of 7 (Canon's 720p uses 4 = 1 of 5) */
+                    adtg_new[2] = (struct adtg_new) {2, 0x800C, BOLEX_SKIP7 ? 0x6 : 0x2};
                     adtg_new[3] = (struct adtg_new) {2, 0x8000, 0x6};
                     adtg_new[4] = (struct adtg_new) {2, 0x8183, 0x21};
                     adtg_new[5] = (struct adtg_new) {2, 0x8184, 0x7B};
@@ -2602,7 +2611,7 @@ static inline uint32_t reg_override_3X3(uint32_t reg, uint32_t old_val)
         if (Framerate_30) {TimerA = 0x20F; TimerB = 0x7E4;}
         /* 36 fps: 32 MHz / (0x210 * 0x694) = 35.99 fps.  TEST BUILD, not yet tried on a camera. */
         if (Framerate_36) {TimerA = 0x20F; TimerB = 0x693;}
-        /* 18 fps (Bolex): same line time as 23.976, longer frame:
+        /* 18 fps: same line time as 23.976, longer frame:
          * 32 MHz / (0x210 * 0xD27) = 18.000 fps.  Like the 1:1 18 fps, only Timer B changes. */
         if (Framerate_18) {TimerA = 0x20F; TimerB = 0xD26;}
         
@@ -2610,6 +2619,18 @@ static inline uint32_t reg_override_3X3(uint32_t reg, uint32_t old_val)
         Preview_V     = 1152;      // from mv1080 mode
         Preview_R     = 0x1D000E;  // from mv1080 mode
         YUV_HD_S_V    = 0x450072;
+
+        /* Bolex 3x7: the whole sensor height in BOLEX_X7_ROWS lines (ADTG 0x800C = 6).
+         * Same 29-line margin as the other 3x3 readouts (0x4A5 = 1160 + 29).
+         * Timers: the 18 fps ones above (0x20F / 0xD26 = 18.000 fps); the line time stays.
+         * Preview: short-readout style values; YUV_HD_S_V follows the High FPS ones
+         * (0x106 @ 726 ... 0x16C @ 976 rows, about 0.378 per row).  EXPERIMENTAL. */
+        if (BOLEX_SKIP7 && is_EOSM)
+        {
+            RAW_V         = BOLEX_X7_ROWS + 29 + reg_height;
+            Preview_V     = BOLEX_X7_ROWS;
+            YUV_HD_S_V    = 0x1050000 + (BOLEX_X7_ROWS * 378 / 1000 - 5);
+        }
     }
     
     YUV_HD_S_H    = 0x10501B5;
@@ -4815,6 +4836,9 @@ static void slim_crop_expected_res(int *w, int *h)
         else
         {
             *w = 1736; *h = 1160;  /* 3:2 */
+            /* Bolex 3x7: the same sensor area, 1 line of 7 */
+            if (BOLEX_SKIP7)
+                *h = BOLEX_X7_ROWS;
             /* 48 fps reads a shorter readout instead: 738 rows (2.35:1) or 958 rows */
             if (crop_preset_fps_menu == 5 && (slim_crop_fps_mask() & 0x20))
                 *h = slim_film_frame_height() <= 738 ? 738 : 958;
@@ -6819,60 +6843,61 @@ static void slim_cover_hold_and_release(int hold_ms)
 }
 
 /* ---- Bolex ---------------------------------------------------------------------------------
- * This build turns the EOS M into a Bolex: two formats, everything else fixed, no ML menu.
+ * This build turns the EOS M into a Bolex: one format (4:3), everything fixed, no ML menu.
  *
- *   16:9  crop_rec 3x3 preset on the A35 readout (1736x1160, Canon's x5 state), recorded
- *         1696x954.  18 fps from crop_rec's own timers: only Timer B changes, so the line
- *         time (rolling shutter) is the 23.976 one.
- *   4:3   crop_rec presets OFF: Canon's own x1 movie Live View, which reads the sensor 3x5
- *         (3 columns binned, 1 line of 5).  mlv_lite records ~1536x692, to be stretched 5/3
- *         vertically (= 4:3).  Fewer lines read, so less rolling shutter.  18 fps from the
- *         ML FPS override in "Low light" mode (Canon's timer A, hence its line time, is kept).
+ * Two ways to read the sensor for that 4:3 picture, switched by a double press of INFO while
+ * we compare them on the camera (one will be kept):
  *
- * Fixed in both: 18 fps, 10-bit lossless, ISO 100, 180 degree shutter, no sound.
- * The format is saved; it is meant to be chosen when a roll is loaded (later stage).
- * For now a double press of INFO switches it, so both can be tested.
+ *   4:3 3x5  crop_rec presets OFF: Canon's own x1 movie Live View, which reads the sensor 3x5
+ *            (3 columns binned, 1 line of 5).  mlv_lite records ~1536x692; stretched 5/3
+ *            vertically it is 4:3.  18 fps from the ML FPS override in "Low light" mode
+ *            (Canon's timer A, hence its line time, is kept).
+ *   4:3 3x7  crop_rec 3x3 preset on the full-height readout, but reading 1 line of 7
+ *            (ADTG 0x800C = 6 instead of 2): ~496 lines for the whole sensor height instead
+ *            of ~696, so the rolling shutter is about 30% shorter.  Softer, more aliasing.
+ *            ~1536x494 recorded, stretched 7/3.  18 fps from crop_rec's timers.
+ *            EXPERIMENTAL: 1-of-7 skipping has not been tried on an EOS M; the preview
+ *            values are worked out from the short 3x3 readouts.
+ *
+ * Fixed in both: 18 fps, 10-bit lossless, ISO 100, 360 degree shutter (1/18 s), no sound.
  */
-#define BOLEX_16_9          1
-#define BOLEX_4_3           2
 #define BOLEX_FPS_X1000     18000
-#define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / 180)  /* 180 degrees: 1/36 s, as 1/x * 1000 */
+#define BOLEX_ANGLE         360
+#define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 360 degrees: 1/18 s, as 1/x * 1000 */
 
-static CONFIG_INT("bolex.format", bolex_fmt_cfg, BOLEX_16_9);
-static int bolex_fmt = 0;               /* format in use; 0 until crop_rec_init has applied it */
+static CONFIG_INT("bolex.format", bolex_fmt_cfg, BOLEX_4_3);
 
 /* src/gui-common.c (Bolex core): 1 once Canon has sent an INFO release.  The EOS M may not
- * send one at all; the next stage (hold INFO to rewind) needs to know.  Shown on screen. */
+ * send one at all; the rewind (hold INFO) needs to know.  Shown on screen. */
 extern int bolex_info_unpress_seen;
 /* src/fps-engio.c (Bolex core): turn the FPS override on at this rate ("Low light"), or off */
 extern void fps_override_force(int enable, int fps_x1000);
 
-/* used by mlv_lite (resolution, bit depth) and the core: BOLEX_16_9, BOLEX_4_3, or 0 */
+/* used by mlv_lite (resolution, bit depth) and the core: BOLEX_4_3, BOLEX_4_3_X7, or 0 */
 int bolex_format()
 {
     return bolex_fmt;
 }
 
-/* Put every setting the Bolex keeps fixed back where it belongs.  Cheap; called often.
- * Settings that are already right are not touched (a change can mean a LV refresh). */
+/* Put every setting the Bolex keeps fixed back where it belongs.  Cheap; called often. */
 static void bolex_fixed_settings(void)
 {
     if (!bolex_fmt)
         return;
 
-    /* the readout and frame: A35 16:9 Crop (the FILM standard default) at 18 fps */
-    crop_preset_3x3_res_menu = 2;       /* mv1080 3:2 = A35 readout */
+    /* the 3x3 preset (used by 3x7): full-height readout at 18 fps */
+    crop_preset_3x3_res_menu = 2;       /* mv1080 3:2 = full-height readout */
     crop_preset_ar_menu = 4;            /* 3:2 */
     crop_preset_fps_menu = 3;           /* 18 fps */
-    slim_film_fmt = 0;                  /* Academy 35mm */
-    slim_film_frame_set(0, 0);          /* 16:9 Crop */
+    slim_film_fmt = 0;                  /* no film window: squeezed pixels (mlv_lite sets the 4:3 size) */
+    slim_film_frame_set(0, 0);
     slim_mode_ui = 2;                   /* 3x3 */
 
-    int want_preset = (bolex_fmt == BOLEX_4_3) ? 0 : 3;    /* OFF / 3x3 */
+    int want_preset = BOLEX_SKIP7 ? 3 : 0;    /* 3x3 / OFF */
     if (crop_preset_index != want_preset)
         crop_preset_index = want_preset;
 
-    /* 10-bit (analog gain in the 16:9 preset; mlv_lite does the 4:3 one) */
+    /* 10-bit (analog gain in the 3x3 preset; mlv_lite does it in Canon's x1 mode) */
     if (bit_depth_analog != 3)
     {
         bit_depth_analog = 3;
@@ -6891,19 +6916,19 @@ static void bolex_fixed_settings(void)
 
 static void bolex_set_format(int fmt)
 {
-    fmt = (fmt == BOLEX_4_3) ? BOLEX_4_3 : BOLEX_16_9;
+    fmt = (fmt == BOLEX_4_3_X7) ? BOLEX_4_3_X7 : BOLEX_4_3;   /* old 16:9 (1) -> 3x5 */
     int was = bolex_fmt;
     bolex_fmt_cfg = fmt;
     bolex_fmt = fmt;
     bolex_fixed_settings();
 
-    /* in Live View: 16:9 needs the x1 -> x5 rebuild with the preset; 4:3 goes back to x1
+    /* in Live View: 3x7 needs the x1 -> x5 rebuild with the preset; 3x5 goes back to x1
      * by itself (bolex_step) */
-    if (was && was != fmt && fmt == BOLEX_16_9 && lv)
+    if (was && was != fmt && fmt == BOLEX_4_3_X7 && lv)
         eosm_lv_guard_request();
 }
 
-/* INFO: a double press switches the format (temporary, until rolls exist) */
+/* INFO: a double press switches between the two readings (temporary, while comparing) */
 static int bolex_info_last_press = 0;
 
 static void bolex_info_pressed(void)
@@ -6912,8 +6937,8 @@ static void bolex_info_pressed(void)
     if (bolex_info_last_press && now - bolex_info_last_press < 500)
     {
         bolex_info_last_press = 0;
-        bolex_set_format(bolex_fmt == BOLEX_4_3 ? BOLEX_16_9 : BOLEX_4_3);
-        NotifyBox(2000, "Formato %s", bolex_fmt == BOLEX_4_3 ? "4:3" : "16:9");
+        bolex_set_format(bolex_fmt == BOLEX_4_3_X7 ? BOLEX_4_3 : BOLEX_4_3_X7);
+        NotifyBox(2000, "4:3 %s", bolex_fmt == BOLEX_4_3_X7 ? "3x7" : "3x5");
         return;
     }
     bolex_info_last_press = now;
@@ -6938,7 +6963,7 @@ static int bolex_shutter_steps(int real_x1000, int want_x1000)
     return steps;
 }
 
-/* Live View, not recording, no menu: keep the format's video mode, ISO 100 and 180 degrees */
+/* Live View, not recording, no menu: keep the video mode, ISO 100 and 360 degrees */
 static void bolex_step(void)
 {
     if (!bolex_fmt || !lv || !is_movie_mode() || RECORDING)
@@ -6946,7 +6971,8 @@ static void bolex_step(void)
 
     bolex_fixed_settings();
 
-    /* 4:3 is the plain x1 view.  x10 stays allowed, for focusing. */
+    /* 3x5 is the plain x1 view (FPS override); 3x7 runs at 18 fps from the preset.
+     * x10 stays allowed, for focusing. */
     fps_override_force(bolex_fmt == BOLEX_4_3, BOLEX_FPS_X1000);
     if (bolex_fmt == BOLEX_4_3 && lv_dispsize == 5)
     {
@@ -6982,7 +7008,7 @@ static void bolex_step(void)
         return;
     }
 
-    /* 180 degrees.  Measured, not computed: what Canon's shutter value means depends on the
+    /* 360 degrees.  Measured, not computed: what Canon's shutter value means depends on the
      * mode (crop_rec timers, FPS override), so read what the sensor really uses and step the
      * shutter until it matches.  The EOS M shutter lock (movtweaks.c) holds it afterwards. */
     static int tries = 0;
@@ -7020,8 +7046,8 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
 
     int fps = fps_get_current_x1000();
     int sh = get_current_shutter_reciprocal_x1000();
-    snprintf(buffer, 64, "%s  %d.%03d FPS  1/%d  ISO %d  10-BIT%s",
-        bolex_fmt == BOLEX_4_3 ? "4:3" : "16:9",
+    snprintf(buffer, 64, "4:3 %s  %d.%03d FPS  1/%d  ISO %d  10-BIT%s",
+        BOLEX_SKIP7 ? "3x7" : "3x5",
         fps / 1000, fps % 1000,
         (sh + 500) / 1000,
         lens_info.iso,
@@ -7537,6 +7563,15 @@ static unsigned int crop_rec_keypress_cbr(unsigned int key)
 {
     extern int kill_canon_gui_mode;
 
+    /* Bolex: INFO never reaches Canon or the old INFO button actions.  Handled before the
+     * Live View guard below, so a reading that never settles can always be switched back. */
+    if (bolex_fmt && key == MODULE_KEY_INFO)
+    {
+        if (lv && is_movie_mode() && !RECORDING)
+            bolex_info_pressed();
+        return 0;
+    }
+
 #ifdef CONFIG_EOSM
     /* The transition controller owns Live View until its post-x5 validation
      * passes. Swallow only controls that can alter preview state; REC and
@@ -7550,14 +7585,6 @@ static unsigned int crop_rec_keypress_cbr(unsigned int key)
          key == MODULE_KEY_INFO))
         return 0;
 #endif
-
-    /* Bolex: INFO never reaches Canon or the old INFO button actions */
-    if (bolex_fmt && key == MODULE_KEY_INFO)
-    {
-        if (lv && is_movie_mode() && !RECORDING)
-            bolex_info_pressed();
-        return 0;
-    }
 
     /* Close the touch editor at the REC press itself, before the asynchronous
      * RAW/H.264 recording state flag changes.  gui-common blocks every touch
@@ -8172,7 +8199,7 @@ static unsigned int raw_info_update_cbr(unsigned int unused)
             case CROP_PRESET_3X3:
             {
                 int b = 1;
-                int s = 2;
+                int s = BOLEX_SKIP7 ? 6 : 2;    /* Bolex 3x7: 1 line of 7 */
                 raw_capture_info.binning_y = b; raw_capture_info.skipping_y = s;
                 break;
             }
@@ -8405,8 +8432,9 @@ static unsigned int crop_rec_init()
         Half_Shutter = 0;   /* half-shutter is only used by Half-Shutter Record */
         Arrows_L_R = 0;     /* no Left/Right remap: leave L/R to Canon */
 
-        /* Bolex: the saved format decides the preset; everything else is fixed */
-        bolex_set_format(bolex_fmt_cfg);
+        /* Bolex: every boot starts in 3x5.  3x7 is experimental (it is tried with a double
+         * press of INFO); if it ever hangs the camera, the next boot must not go back to it. */
+        bolex_set_format(BOLEX_4_3);
         lvinfo_add_items(bolex_info_items, COUNT(bolex_info_items));
 
         /* Flat Movie-page crop settings (no Crop Mode submenu / Customize Buttons). */
