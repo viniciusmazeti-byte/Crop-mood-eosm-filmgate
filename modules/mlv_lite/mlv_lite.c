@@ -253,7 +253,7 @@ static int bpp_digital_gain()
         return 14;
     }
 
-    /* Bolex (Canon's x1 mode; the 3x3 preset uses crop_rec's analog gain): fixed 10-bit */
+    /* Bolex (Canon's x1 mode): fixed 10-bit */
     if (bolex_format())
     {
         return 10;
@@ -1020,7 +1020,7 @@ void update_resolution_params()
     int den = aspect_ratio_presets_den[aspect_ratio_index];
 
     /* Bolex 4:3: 1536 wide, and as high as gives 4:3 once stretched vertically (the RAWC
-     * block in the file says by how much): ~692 lines in 3x5 (Canon x1), ~494 in 3x7 */
+     * block in the file says by how much): ~692 lines in Canon's x1 view (3x5), fewer in the reading tests */
     if (bolex_format() && squeeze_factor != 1.0f)
     {
         res_x = MIN(1536, max_res_x);
@@ -2489,7 +2489,7 @@ static void bolex_raw_settings(void)
         return;
 
     raw_video_enabled = 1;
-    output_format = OUTPUT_AUTO_BIT_LOSSLESS;   /* lossless; 10-bit comes from crop_rec (3x7) or bpp_digital_gain (3x5) */
+    output_format = OUTPUT_AUTO_BIT_LOSSLESS;   /* lossless; 10-bit comes from bpp_digital_gain */
     pre_record = 0;
     rec_trigger = 0;
     dolly_mode = 0;

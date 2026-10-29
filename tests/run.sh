@@ -36,7 +36,8 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "#define BOLEX_ANGLE"
   python3 tests/extract.py $CR line     "#define BOLEX_SHUTTER_X1000"
   python3 tests/extract.py $CR function bolex_shutter_steps
-  python3 tests/extract.py $CR line     "#define BOLEX_X7_ROWS"
+  python3 tests/extract.py $CR block    "struct bolex_reading"
+  python3 tests/extract.py $CR line     "#define BOLEX_READINGS"
 } > "$OUT/bolex_snippets.h"
 python3 tests/extract.py modules/mlv_lite/mlv_lite.c function calc_res_y > "$OUT/bolex_mlv_snippets.h"
 

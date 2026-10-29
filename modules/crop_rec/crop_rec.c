@@ -116,13 +116,24 @@ static int crop_preset_fps = 0;
 #define Framerate_48   (crop_preset_fps == 5)   /* slim A35 frames that fit in a short readout (see update_patch) */
 static int a35_short_readout = 0;   /* 48 fps on A35 16:9 / 1.85: 1736x958 readout (set in update_patch) */
 
-/* Bolex (see the "Bolex" section further down): the sensor reading in use */
-#define BOLEX_4_3           2   /* 3x5, Canon x1 */
-#define BOLEX_4_3_X7        3   /* 3x7, crop_rec 3x3 preset */
-#define BOLEX_X7_ROWS       496 /* lines read in 3x7: 496 * 7 = 3472 sensor lines, the full height */
-static int bolex_fmt = 0;       /* 0 until crop_rec_init has applied the saved one */
-/* the 3x3 preset reads 1 line of 7 (register overrides, raw geometry) */
-#define BOLEX_SKIP7 (bolex_fmt == BOLEX_4_3_X7)
+/* Bolex reading tests (see the "Bolex" section further down).  Each one starts from the
+ * proven 3x3 "694p" High FPS readout (1736x694, 60 fps, working preview) and changes one
+ * thing at a time, so a hang tells which change caused it.
+ *   rows   lines read (RAW_V = rows + 28, as 0x2D2 = 694 + 28)
+ *   skip   1 line read of every 'skip' (ADTG 0x800C = skip - 1; Canon's own 720p uses 5)
+ *   cmos7  CMOS[7]: 0x806 = the 694p band centred on the sensor, 0x800 = from the top */
+struct bolex_reading { const char * name; int rows; int skip; int cmos7; };
+static const struct bolex_reading bolex_readings[] = {
+    { "3x5",          0,  5, 0     },   /* 0: the normal one, Canon's x1 view, no preset */
+    { "T1 3x3 694", 694,  3, 0x806 },   /* control: the proven readout, only slowed to 18 fps */
+    { "T2 3x5 694", 694,  5, 0x800 },   /* Canon's 1-of-5 inside crop_rec: full height */
+    { "T3 3x7 694", 694,  7, 0x800 },   /* 1-of-7, lines read unchanged (past the bottom) */
+    { "T4 3x7 496", 496,  7, 0x800 },   /* 1-of-7, full height in fewer lines: less jello */
+    { "T5 3x10 346",346, 10, 0x800 },   /* 1-of-10, full height in fewer lines still */
+};
+#define BOLEX_READINGS ((int)(sizeof(bolex_readings) / sizeof(bolex_readings[0])))
+static int bolex_test = 0;      /* reading in use: 0 = normal; never saved, every boot is 0 */
+#define BOLEX_TEST (bolex_test > 0)
 
 /* customized buttons variables
  * EOS M slim defaults:
@@ -1111,6 +1122,8 @@ static void FAST cmos_hook(uint32_t* regs, uint32_t* stack, uint32_t pc)
                         AR_2_20_1) cmos_new[7] = 0x804;
                     if (AR_2_35_1 ||
                         AR_2_39_1) cmos_new[7] = 0x806; // AR_2_39_1 is actually 2.50:1 preset
+                    if (BOLEX_TEST)
+                        cmos_new[7] = bolex_readings[bolex_test].cmos7;
                 }
                 if (mv1080 || mv1080_3_2) cmos_new[7] = 0x800;
                 cmos_new[5] = 0x20;
@@ -1381,8 +1394,8 @@ static void FAST adtg_hook(uint32_t* regs, uint32_t* stack, uint32_t pc)
                 case CROP_PRESET_3X3:
                 if (is_EOSM)
                 {
-                    /* Bolex 3x7: 6 = read 1 line of 7 (Canon's 720p uses 4 = 1 of 5) */
-                    adtg_new[2] = (struct adtg_new) {2, 0x800C, BOLEX_SKIP7 ? 0x6 : 0x2};
+                    /* Bolex tests: 1 line of 'skip' (2 = 1 of 3) */
+                    adtg_new[2] = (struct adtg_new) {2, 0x800C, BOLEX_TEST ? bolex_readings[bolex_test].skip - 1 : 0x2};
                     adtg_new[3] = (struct adtg_new) {2, 0x8000, 0x6};
                     adtg_new[4] = (struct adtg_new) {2, 0x8183, 0x21};
                     adtg_new[5] = (struct adtg_new) {2, 0x8184, 0x7B};
@@ -2576,6 +2589,16 @@ static inline uint32_t reg_override_3X3(uint32_t reg, uint32_t old_val)
             
             YUV_LV_S_V    = 0x1E002B;   // default x5 mode value
             YUV_LV_Buf    = 0x1DF05A0;  // default x5 mode value
+
+            /* Bolex tests: 18 fps with this readout's line time
+             * (32 MHz / (0x208 * 0xD5B) = 17.999 fps), and its number of lines */
+            if (BOLEX_TEST && is_EOSM)
+            {
+                RAW_V         = bolex_readings[bolex_test].rows + 28 + reg_height;
+                TimerA        = 0x207;
+                TimerB        = 0xD5A;
+                Preview_V     = bolex_readings[bolex_test].rows;
+            }
         }
     }
     
@@ -2619,18 +2642,6 @@ static inline uint32_t reg_override_3X3(uint32_t reg, uint32_t old_val)
         Preview_V     = 1152;      // from mv1080 mode
         Preview_R     = 0x1D000E;  // from mv1080 mode
         YUV_HD_S_V    = 0x450072;
-
-        /* Bolex 3x7: the whole sensor height in BOLEX_X7_ROWS lines (ADTG 0x800C = 6).
-         * Same 29-line margin as the other 3x3 readouts (0x4A5 = 1160 + 29).
-         * Timers: the 18 fps ones above (0x20F / 0xD26 = 18.000 fps); the line time stays.
-         * Preview: short-readout style values; YUV_HD_S_V follows the High FPS ones
-         * (0x106 @ 726 ... 0x16C @ 976 rows, about 0.378 per row).  EXPERIMENTAL. */
-        if (BOLEX_SKIP7 && is_EOSM)
-        {
-            RAW_V         = BOLEX_X7_ROWS + 29 + reg_height;
-            Preview_V     = BOLEX_X7_ROWS;
-            YUV_HD_S_V    = 0x1050000 + (BOLEX_X7_ROWS * 378 / 1000 - 5);
-        }
     }
     
     YUV_HD_S_H    = 0x10501B5;
@@ -4827,6 +4838,14 @@ static void slim_crop_expected_res(int *w, int *h)
 
     if (CROP_PRESET_MENU == CROP_PRESET_3X3)
     {
+        /* Bolex tests: the lines they read */
+        if (BOLEX_TEST)
+        {
+            *w = 1736;
+            *h = bolex_readings[bolex_test].rows;
+            return;
+        }
+
         /* One resolution per Aspect Ratio (Preset always Highest / High FPS or 3:2). */
         int ar = COERCE(crop_preset_ar_menu, 0, 4);
         if (ar == 0) { *w = 1736; *h = 976; }
@@ -4836,9 +4855,6 @@ static void slim_crop_expected_res(int *w, int *h)
         else
         {
             *w = 1736; *h = 1160;  /* 3:2 */
-            /* Bolex 3x7: the same sensor area, 1 line of 7 */
-            if (BOLEX_SKIP7)
-                *h = BOLEX_X7_ROWS;
             /* 48 fps reads a shorter readout instead: 738 rows (2.35:1) or 958 rows */
             if (crop_preset_fps_menu == 5 && (slim_crop_fps_mask() & 0x20))
                 *h = slim_film_frame_height() <= 738 ? 738 : 958;
@@ -6843,29 +6859,28 @@ static void slim_cover_hold_and_release(int hold_ms)
 }
 
 /* ---- Bolex ---------------------------------------------------------------------------------
- * This build turns the EOS M into a Bolex: one format (4:3), everything fixed, no ML menu.
+ * This build turns the EOS M into a Bolex: one format, everything fixed, no ML menu.
  *
- * Two ways to read the sensor for that 4:3 picture, switched by a double press of INFO while
- * we compare them on the camera (one will be kept):
+ *   4:3  crop_rec presets OFF: Canon's own x1 movie Live View, which reads the sensor 3x5
+ *        (3 columns binned, 1 line of 5) - the fewest lines, so the least rolling shutter.
+ *        mlv_lite records ~1536x692; stretched 5/3 vertically it is 4:3.  18 fps from the
+ *        ML FPS override in "Low light" mode (Canon's timer A, hence its line time, is kept).
  *
- *   4:3 3x5  crop_rec presets OFF: Canon's own x1 movie Live View, which reads the sensor 3x5
- *            (3 columns binned, 1 line of 5).  mlv_lite records ~1536x692; stretched 5/3
- *            vertically it is 4:3.  18 fps from the ML FPS override in "Low light" mode
- *            (Canon's timer A, hence its line time, is kept).
- *   4:3 3x7  crop_rec 3x3 preset on the full-height readout, but reading 1 line of 7
- *            (ADTG 0x800C = 6 instead of 2): ~496 lines for the whole sensor height instead
- *            of ~696, so the rolling shutter is about 30% shorter.  Softer, more aliasing.
- *            ~1536x494 recorded, stretched 7/3.  18 fps from crop_rec's timers.
- *            EXPERIMENTAL: 1-of-7 skipping has not been tried on an EOS M; the preview
- *            values are worked out from the short 3x3 readouts.
+ * Fixed: 18 fps, 10-bit lossless, ISO 100, 360 degree shutter (1/18 s), no sound.
  *
- * Fixed in both: 18 fps, 10-bit lossless, ISO 100, 360 degree shutter (1/18 s), no sound.
+ * Reading tests (bolex_readings[], top of file): readings with fewer lines, for less rolling
+ * shutter.  A first 1-of-7 try on the full-height 3x3 readout hung the camera, so the tests
+ * now start from the proven 694p readout and change one thing at a time.
+ *   INFO x3 (in the normal reading): choose the next test (saved)
+ *   INFO x2: try the chosen test / back to normal
+ * Every boot starts in the normal reading, so a hang never repeats itself at the next boot.
  */
+#define BOLEX_4_3           2   /* the only format; 0 = not a Bolex build */
 #define BOLEX_FPS_X1000     18000
 #define BOLEX_ANGLE         360
 #define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 360 degrees: 1/18 s, as 1/x * 1000 */
 
-static CONFIG_INT("bolex.format", bolex_fmt_cfg, BOLEX_4_3);
+static int bolex_fmt = 0;               /* BOLEX_4_3 once crop_rec_init has run */
 
 /* src/gui-common.c (Bolex core): 1 once Canon has sent an INFO release.  The EOS M may not
  * send one at all; the rewind (hold INFO) needs to know.  Shown on screen. */
@@ -6873,7 +6888,7 @@ extern int bolex_info_unpress_seen;
 /* src/fps-engio.c (Bolex core): turn the FPS override on at this rate ("Low light"), or off */
 extern void fps_override_force(int enable, int fps_x1000);
 
-/* used by mlv_lite (resolution, bit depth) and the core: BOLEX_4_3, BOLEX_4_3_X7, or 0 */
+/* used by mlv_lite (resolution, bit depth) and the core: BOLEX_4_3, or 0 */
 int bolex_format()
 {
     return bolex_fmt;
@@ -6885,19 +6900,23 @@ static void bolex_fixed_settings(void)
     if (!bolex_fmt)
         return;
 
-    /* the 3x3 preset (used by 3x7): full-height readout at 18 fps */
-    crop_preset_3x3_res_menu = 2;       /* mv1080 3:2 = full-height readout */
-    crop_preset_ar_menu = 4;            /* 3:2 */
-    crop_preset_fps_menu = 3;           /* 18 fps */
-    slim_film_fmt = 0;                  /* no film window: squeezed pixels (mlv_lite sets the 4:3 size) */
-    slim_film_frame_set(0, 0);
-    slim_mode_ui = 2;                   /* 3x3 */
+    if (BOLEX_TEST)
+    {
+        /* the 3x3 preset, 694p High FPS readout (changed by the test, see bolex_readings) */
+        crop_preset_index = 3;
+        crop_preset_3x3_res_menu = 0;   /* High FPS */
+        crop_preset_ar_menu = 4;        /* with fps_reduce 0: the 1736x694 "2.50:1" readout */
+        crop_preset_fps_reduce = 0;
+        crop_preset_fps_menu = 0;       /* timers come from the test */
+        slim_mode_ui = 2;
+    }
+    else if (crop_preset_index != 0)
+    {
+        /* no crop_rec preset: Canon's own x1 reading */
+        crop_preset_index = 0;
+    }
 
-    int want_preset = BOLEX_SKIP7 ? 3 : 0;    /* 3x3 / OFF */
-    if (crop_preset_index != want_preset)
-        crop_preset_index = want_preset;
-
-    /* 10-bit (analog gain in the 3x3 preset; mlv_lite does it in Canon's x1 mode) */
+    /* 10-bit: crop_rec's analog gain in the tests, mlv_lite's digital gain in Canon's x1 mode */
     if (bit_depth_analog != 3)
     {
         bit_depth_analog = 3;
@@ -6914,34 +6933,50 @@ static void bolex_fixed_settings(void)
     tapdisp = 0;
 }
 
-static void bolex_set_format(int fmt)
-{
-    fmt = (fmt == BOLEX_4_3_X7) ? BOLEX_4_3_X7 : BOLEX_4_3;   /* old 16:9 (1) -> 3x5 */
-    int was = bolex_fmt;
-    bolex_fmt_cfg = fmt;
-    bolex_fmt = fmt;
-    bolex_fixed_settings();
-
-    /* in Live View: 3x7 needs the x1 -> x5 rebuild with the preset; 3x5 goes back to x1
-     * by itself (bolex_step) */
-    if (was && was != fmt && fmt == BOLEX_4_3_X7 && lv)
-        eosm_lv_guard_request();
-}
-
-/* INFO: a double press switches between the two readings (temporary, while comparing) */
-static int bolex_info_last_press = 0;
+/* INFO presses, counted here and acted on by bolex_step once INFO has been quiet a moment */
+static CONFIG_INT("bolex.test.next", bolex_test_next, 1);   /* the test INFO x2 will try */
+static volatile int bolex_info_count = 0;
+static volatile int bolex_info_last = 0;
 
 static void bolex_info_pressed(void)
 {
     int now = get_ms_clock();
-    if (bolex_info_last_press && now - bolex_info_last_press < 500)
-    {
-        bolex_info_last_press = 0;
-        bolex_set_format(bolex_fmt == BOLEX_4_3_X7 ? BOLEX_4_3 : BOLEX_4_3_X7);
-        NotifyBox(2000, "4:3 %s", bolex_fmt == BOLEX_4_3_X7 ? "3x7" : "3x5");
+    if (bolex_info_count && now - bolex_info_last > 450)
+        bolex_info_count = 0;
+    bolex_info_count++;
+    bolex_info_last = now;
+}
+
+static void bolex_set_reading(int t)
+{
+    t = COERCE(t, 0, BOLEX_READINGS - 1);
+    int was = bolex_test;
+    bolex_test = t;
+    bolex_fixed_settings();
+
+    /* a test needs crop_rec's x1 -> x5 rebuild; back to normal, bolex_step returns to x1 */
+    if (t && t != was && lv)
+        eosm_lv_guard_request();
+}
+
+static void bolex_info_act(void)
+{
+    if (!bolex_info_count || get_ms_clock() - bolex_info_last <= 450)
         return;
+    int n = bolex_info_count;
+    bolex_info_count = 0;
+
+    bolex_test_next = COERCE(bolex_test_next, 1, BOLEX_READINGS - 1);
+    if (n == 2)
+    {
+        bolex_set_reading(BOLEX_TEST ? 0 : bolex_test_next);
+        NotifyBox(2000, "4:3 %s", bolex_readings[bolex_test].name);
     }
-    bolex_info_last_press = now;
+    else if (n >= 3 && !BOLEX_TEST)
+    {
+        bolex_test_next = bolex_test_next % (BOLEX_READINGS - 1) + 1;
+        NotifyBox(3000, "Proximo teste: %s  (INFO 2x)", bolex_readings[bolex_test_next].name);
+    }
 }
 
 /* raw shutter steps (1/8 EV) that bring a shutter of 1/real to 1/want; + means faster */
@@ -6969,12 +7004,13 @@ static void bolex_step(void)
     if (!bolex_fmt || !lv || !is_movie_mode() || RECORDING)
         return;
 
+    bolex_info_act();
     bolex_fixed_settings();
 
-    /* 3x5 is the plain x1 view (FPS override); 3x7 runs at 18 fps from the preset.
+    /* normal: the plain x1 view at 18 fps (FPS override); tests: crop_rec's timers.
      * x10 stays allowed, for focusing. */
-    fps_override_force(bolex_fmt == BOLEX_4_3, BOLEX_FPS_X1000);
-    if (bolex_fmt == BOLEX_4_3 && lv_dispsize == 5)
+    fps_override_force(!BOLEX_TEST, BOLEX_FPS_X1000);
+    if (!BOLEX_TEST && lv_dispsize == 5)
     {
         static int last_zoom = 0;
         int now = get_ms_clock();
@@ -7012,10 +7048,10 @@ static void bolex_step(void)
      * mode (crop_rec timers, FPS override), so read what the sensor really uses and step the
      * shutter until it matches.  The EOS M shutter lock (movtweaks.c) holds it afterwards. */
     static int tries = 0;
-    static int tries_fmt = 0;
-    if (tries_fmt != bolex_fmt)
+    static int tries_test = 0;
+    if (tries_test != bolex_test)
     {
-        tries_fmt = bolex_fmt;
+        tries_test = bolex_test;
         tries = 0;
     }
     int real = get_current_shutter_reciprocal_x1000();
@@ -7047,7 +7083,7 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     int fps = fps_get_current_x1000();
     int sh = get_current_shutter_reciprocal_x1000();
     snprintf(buffer, 64, "4:3 %s  %d.%03d FPS  1/%d  ISO %d  10-BIT%s",
-        BOLEX_SKIP7 ? "3x7" : "3x5",
+        bolex_readings[bolex_test].name,
         fps / 1000, fps % 1000,
         (sh + 500) / 1000,
         lens_info.iso,
@@ -8199,7 +8235,7 @@ static unsigned int raw_info_update_cbr(unsigned int unused)
             case CROP_PRESET_3X3:
             {
                 int b = 1;
-                int s = BOLEX_SKIP7 ? 6 : 2;    /* Bolex 3x7: 1 line of 7 */
+                int s = BOLEX_TEST ? bolex_readings[bolex_test].skip - 1 : 2;   /* Bolex tests */
                 raw_capture_info.binning_y = b; raw_capture_info.skipping_y = s;
                 break;
             }
@@ -8432,9 +8468,9 @@ static unsigned int crop_rec_init()
         Half_Shutter = 0;   /* half-shutter is only used by Half-Shutter Record */
         Arrows_L_R = 0;     /* no Left/Right remap: leave L/R to Canon */
 
-        /* Bolex: every boot starts in 3x5.  3x7 is experimental (it is tried with a double
-         * press of INFO); if it ever hangs the camera, the next boot must not go back to it. */
-        bolex_set_format(BOLEX_4_3);
+        /* Bolex: one format; everything else is fixed */
+        bolex_fmt = BOLEX_4_3;
+        bolex_fixed_settings();
         lvinfo_add_items(bolex_info_items, COUNT(bolex_info_items));
 
         /* Flat Movie-page crop settings (no Crop Mode submenu / Customize Buttons). */
@@ -8495,7 +8531,7 @@ MODULE_CONFIGS_START()
     MODULE_CONFIG(Arrows_U_D)
     MODULE_CONFIG(more_hacks)
     MODULE_CONFIG(crop_settings_ver)
-    MODULE_CONFIG(bolex_fmt_cfg)
+    MODULE_CONFIG(bolex_test_next)
 MODULE_CONFIGS_END()
 
 MODULE_CBRS_START()

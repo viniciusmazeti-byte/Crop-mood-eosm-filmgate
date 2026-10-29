@@ -64,9 +64,28 @@ int main(void)
 
     /* 3x5: Canon x1 raw is 727 lines, 28 on top and 3 at the bottom are not picture */
     check_43("4:3 3x5", (727 - 28 - 3) & ~1, 4);
-    /* 3x7: BOLEX_X7_ROWS lines read, plus the 29-line margin, 28 of it on top */
-    check_43("4:3 3x7", (BOLEX_X7_ROWS + 29 - 28) & ~1, 6);
-    CHECK(BOLEX_X7_ROWS * 7 <= 3480, "3x7 reads %d sensor lines, more than the sensor has", BOLEX_X7_ROWS * 7);
+
+    /* reading tests: each one changes the proven 694p readout (1736x694, 1 line of 3) */
+    CHECK(BOLEX_READINGS == 6, "%d readings", BOLEX_READINGS);
+    CHECK(bolex_readings[0].rows == 0, "reading 0 is the normal one (no preset)");
+    CHECK(bolex_readings[1].rows == 694 && bolex_readings[1].skip == 3 && bolex_readings[1].cmos7 == 0x806,
+          "T1 must be the unchanged 694p readout");
+    for (int i = 1; i < BOLEX_READINGS; i++)
+    {
+        const struct bolex_reading * r = &bolex_readings[i];
+        CHECK(r->rows > 0 && r->rows <= 694 && (r->rows & 1) == 0, "%s: %d lines", r->name, r->rows);
+        CHECK(r->skip >= 3 && r->skip <= 16, "%s: skip %d", r->name, r->skip);
+        CHECK(r->cmos7 == 0x800 || r->cmos7 == 0x806, "%s: CMOS[7] %x", r->name, r->cmos7);
+        /* readings that cover the sensor from the top, within its 3480 lines: a true 4:3 frame */
+        if (r->cmos7 == 0x800 && r->rows * r->skip <= 3480)
+        {
+            check_43(r->name, r->rows, r->skip - 1);
+            if (r->skip > 5)
+                CHECK(r->rows * r->skip >= 3400, "%s covers only %d of the sensor's lines", r->name, r->rows * r->skip);
+        }
+    }
+    /* T4 / T5 read fewer lines than Canon's x1 (696): that is the point */
+    CHECK(bolex_readings[4].rows < 696 * 3 / 4 && bolex_readings[5].rows < 696 / 2, "fewer lines than 3x5");
 
     printf("bolex_tests: %d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;

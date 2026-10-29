@@ -23,5 +23,5 @@ extern WEAK_FUNC(ret_0) int crop_rec_film_standard();
 extern WEAK_FUNC(ret_0) int crop_rec_video_standard();
 /* Settings -> Half-Shutter Record: 1 = a half-press of the shutter button starts/stops recording. */
 extern WEAK_FUNC(ret_0) int crop_rec_shutter_record();
-/* Bolex: the 4:3 reading in use, 2 = 3x5 (Canon x1), 3 = 3x7 (3x3 preset); 0 = not a Bolex build */
+/* Bolex: 2 = 4:3 (Canon x1, 3x5), the only format; 0 = not a Bolex build */
 extern WEAK_FUNC(ret_0) int bolex_format();
