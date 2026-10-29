@@ -6894,6 +6894,10 @@ static int bolex_iso_step(int index, int sign)
 #define BOLEX_RAW_1_30      96
 #define BOLEX_RAW_1_4000    152
 
+/* the shutter the Bolex holds (bolex_step), and when a click last changed it (info line) */
+static int bolex_raw_target = BOLEX_RAW_1_30;
+static int bolex_shutter_shown = 0;
+
 /* the next Canon 1/3-stop shutter code from raw, one step faster (+1) or slower (-1);
  * the thirds sit at 0, 3 and 5 of every 8 (96 = 1/30, 99 = 1/40, 101 = 1/50, 104 = 1/60) */
 static int bolex_next_third(int raw, int sign)
@@ -6997,29 +7001,26 @@ static void bolex_step(void)
         return;
 #endif
 
-    /* the shutter: 360 degrees (Canon 1/30) once at start, then the rear dial, 1/3 stop per
-     * click (gui-common.c), from 1/30 to 1/4000.  The EOS M shutter lock (movtweaks.c) holds it. */
+    /* the shutter: a target of our own, 360 degrees (Canon 1/30) at start, moved by the rear
+     * dial / Left-Right arrows, 1/3 stop per click (gui-common.c), 1/30 .. 1/4000.  Held: if
+     * anything else puts Canon's shutter elsewhere, it is set back (camera test: a change came
+     * back to 1/32 within a moment).  The EOS M shutter lock (movtweaks.c) is told first. */
     if (bolex_canon_mode_ok() && lens_info.raw_shutter)
     {
-        static int start_done = 0;
-        int raw = lens_info.raw_shutter;
-        if (!start_done)
-        {
-            raw = BOLEX_RAW_1_30;
-            start_done = 1;
-            bolex_shutter_clicks = 0;
-        }
         while (bolex_shutter_clicks)
         {
             int sign = bolex_shutter_clicks > 0 ? 1 : -1;
-            raw = bolex_next_third(raw, sign);
+            bolex_raw_target = COERCE(bolex_next_third(bolex_raw_target, sign), BOLEX_RAW_1_30, BOLEX_RAW_1_4000);
             bolex_shutter_clicks -= sign;
+            bolex_shutter_shown = get_ms_clock();
         }
-        raw = COERCE(raw, BOLEX_RAW_1_30, BOLEX_RAW_1_4000);
-        if (raw != lens_info.raw_shutter)
+        static int last_set = 0;
+        int now = get_ms_clock();
+        if (lens_info.raw_shutter != bolex_raw_target && now - last_set >= 300)
         {
-            shutter_lock_accept(raw);
-            lens_set_rawshutter(raw);
+            last_set = now;
+            shutter_lock_accept(bolex_raw_target);
+            lens_set_rawshutter(bolex_raw_target);
         }
     }
 
@@ -7090,6 +7091,10 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
         item->color_fg = COLOR_WHITE;
         return;
     }
+
+    /* a shutter click: the line in yellow for a moment, so it shows it was taken */
+    if (bolex_shutter_shown && get_ms_clock() - bolex_shutter_shown < 1500)
+        item->color_fg = COLOR_YELLOW;
 
     snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT",
         fps / 1000, fps % 1000,
