@@ -6844,8 +6844,8 @@ static void slim_cover_hold_and_release(int hold_ms)
  * stays off and the info line says what to set.
  *
  * Fixed, no choices: 32 fps, played at 18, 14-bit lossless, ISO 100, 360 degree shutter
- * (1/32 s), no sound.  The screen is always mlv_lite's Framing preview (slow, but exactly the
- * recorded window); x10 is Canon's, for focusing.  INFO does nothing.
+ * (1/32 s), no sound.  INFO switches the screen between Canon's real-time view (at power on)
+ * and mlv_lite's Framing preview (slow, but exactly the recorded window).
  *
  * (Tried and removed: readings with fewer lines, 3x7 / 3x10 - the files record, but the screen
  * of every reading Canon or crop mood never calibrated stays black or hangs; and an in-camera
@@ -6908,9 +6908,10 @@ static int bolex_canon_fast_enough(void)
     return video_mode_fps * 1000 > BOLEX_FPS_X1000;
 }
 
-/* INFO: does nothing */
+/* INFO: real-time view <-> Framing preview (mlv_lite; real-time at power on) */
 static void bolex_info_pressed(void)
 {
+    mlv_lite_info_framing_toggle();
 }
 
 /* raw shutter steps (1/8 EV) that bring a shutter of 1/real to 1/want; + means faster */
@@ -7018,25 +7019,12 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     int fps = fps_get_current_x1000();
     int sh = get_current_shutter_reciprocal_x1000();
 
-    /* Temporary check of the Framing preview (the INFO toggle showed nothing on the camera):
-     * PV, then 1/0 for: mlv_lite wants it, the core display filter is on, Global Draw,
-     * Live View idle, raw Live View on; then the preview frames drawn so far (should count up). */
-    extern int display_filter_enabled();
-    extern int get_global_draw();
-    extern int liveview_display_idle();
-    extern int raw_lv_is_enabled();
-
-    snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d  ISO %d  14-BIT  PV%d%d%d%d%d %d",
+    snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d  ISO %d  14-BIT%s",
         fps / 1000, fps % 1000,
         BOLEX_PLAY_FPS,
         (sh + 500) / 1000,
         lens_info.iso,
-        mlv_lite_preview_wanted() ? 1 : 0,
-        display_filter_enabled() ? 1 : 0,
-        get_global_draw() ? 1 : 0,
-        liveview_display_idle() ? 1 : 0,
-        raw_lv_is_enabled() ? 1 : 0,
-        mlv_lite_preview_frames() % 1000);
+        bolex_info_unpress_seen ? "  INFO+" : "");
 }
 
 static struct lvinfo_item bolex_info_items[] = {
