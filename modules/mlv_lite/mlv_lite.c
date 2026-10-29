@@ -1020,8 +1020,9 @@ void update_resolution_params()
     int den = aspect_ratio_presets_den[aspect_ratio_index];
 
     /* Bolex 4:3: 1536 wide, and as high as gives 4:3 once stretched vertically (the RAWC
-     * block in the file says by how much): ~692 lines in Canon's x1 view (3x5), fewer in the reading tests */
-    if (bolex_format() && squeeze_factor != 1.0f)
+     * block in the file says by how much): ~692 lines in Canon's x1 view (3x5); in the
+     * reading tests 1152 (3x3), 692, 494 or 346 */
+    if (bolex_format())
     {
         res_x = MIN(1536, max_res_x);
         num = 4;
