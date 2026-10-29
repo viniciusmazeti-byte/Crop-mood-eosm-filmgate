@@ -5287,8 +5287,8 @@ static int raw_rec_should_preview(void)
     /* EOS M Settings → INFO Button = Framing: toggle ML framing vs real-time LV.
      * Framing is entry 5 in crop_rec's INFO list (OFF, Histogram, Waveform, Zebras,
      * False Color, Framing, Quick Panel) - keep this number in step with crop_rec.c. */
-    if (cam_eos_m && (INFO_button == 5 || bolex_format()))
-        return slim_info_framing_active;     /* Bolex: INFO switches it; real-time at power on */
+    if (cam_eos_m && INFO_button == 5)
+        return slim_info_framing_active;
 
     /* framing is incorrect in modes with high resolutions
      * (e.g. x5 zoom, crop_rec) */

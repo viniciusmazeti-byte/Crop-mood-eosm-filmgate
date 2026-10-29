@@ -6844,8 +6844,8 @@ static void slim_cover_hold_and_release(int hold_ms)
  * stays off and the info line says what to set.
  *
  * Fixed, no choices: 32 fps, played at 18, 14-bit lossless, ISO 100, 360 degree shutter
- * (1/32 s), no sound.  INFO switches the screen between Canon's real-time view (at power on)
- * and mlv_lite's Framing preview (slow, but exactly the recorded window).
+ * (1/32 s), no sound.  INFO does nothing.  (Tried and removed: mlv_lite's Framing preview,
+ * by INFO or always on - on the camera it showed nothing, then froze on the first frame.)
  *
  * (Tried and removed: readings with fewer lines, 3x7 / 3x10 - the files record, but the screen
  * of every reading Canon or crop mood never calibrated stays black or hangs; and an in-camera
@@ -6908,10 +6908,9 @@ static int bolex_canon_fast_enough(void)
     return video_mode_fps * 1000 > BOLEX_FPS_X1000;
 }
 
-/* INFO: real-time view <-> Framing preview (mlv_lite; real-time at power on) */
+/* INFO: does nothing */
 static void bolex_info_pressed(void)
 {
-    mlv_lite_info_framing_toggle();
 }
 
 /* raw shutter steps (1/8 EV) that bring a shutter of 1/real to 1/want; + means faster */
