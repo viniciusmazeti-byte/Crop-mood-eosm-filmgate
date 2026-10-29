@@ -56,6 +56,7 @@
 #include <screenshot.h>
 #include <film-formats.h>
 #include <settings-check.h>
+#include <bolex-stab.h>
 #include "../lv_rec/lv_rec.h"
 #include "edmac.h"
 #include "edmac-memcpy.h"
@@ -410,6 +411,8 @@ struct frame_slot
     int payload_size;   /* size effectively used by image data */
     int frame_number;   /* from 0 to n */
     int is_meta;        /* when used by some other module and does not contain VIDF, disables consistency checks used for video frame slots */
+    int crop_x;         /* where this frame is cut from the raw buffer (Bolex tripod mode moves it per frame) */
+    int crop_y;
     enum {
         SLOT_FREE,          /* available for image capture */
         SLOT_RESERVED,      /* it may become available when resizing the previous slots */
@@ -1024,7 +1027,8 @@ void update_resolution_params()
      * reading tests 1152 (3x3), 692, 494 or 346 */
     if (bolex_format())
     {
-        res_x = MIN(1536, max_res_x);
+        /* tripod mode: 1376 wide leaves ~10% around the window to follow the scene */
+        res_x = MIN(bolex_stab_mode() ? 1376 : 1536, max_res_x);
         num = 4;
         den = 3;
     }
@@ -3457,6 +3461,11 @@ static void compress_task()
         void* out_ptr = slots[slot_index].ptr + VIDF_HDR_SIZE;
         void* fullSizeBuffer = fullsize_buffers[fullsize_index];
 
+        /* where to cut this frame: set per frame by process_frame (the Bolex tripod mode moves
+         * it); a slot that never went through process_frame (warm-up) uses the current one */
+        int crop_x = slots[slot_index].crop_x ? slots[slot_index].crop_x : (skip_x + 7) & ~7;
+        int crop_y = slots[slot_index].crop_x ? slots[slot_index].crop_y : skip_y & ~1;
+
         edmac_start_clock = GET_DIGIC_TIMER();
 
         if (OUTPUT_COMPRESSION)
@@ -3469,7 +3478,7 @@ static void compress_task()
 
             int compressed_size = lossless_compress_raw_rectangle(
                 outSuite, fullSizeBuffer,
-                raw_info.width, (skip_x + 7) & ~7, skip_y & ~1,
+                raw_info.width, crop_x, crop_y,
                 res_x, res_y
             );
 
@@ -3527,7 +3536,7 @@ static void compress_task()
             edmac_copy_rectangle_cbr_start(
                 (void*)out_ptr, fullSizeBuffer,
                 raw_info.pitch,
-                (skip_x+7)/8*BPP, skip_y/2*2,
+                crop_x/8*BPP, crop_y,
                 res_x*BPP/8, 0, 0, res_x*BPP/8, res_y,
                 &edmac_cbr_r, &edmac_cbr_w, NULL
             );
@@ -3617,6 +3626,8 @@ void process_frame(int next_fullsize_buffer_pos)
     /* set VIDF metadata for this frame */
     vidf_hdr.frameNumber = slots[capture_slot].frame_number - 1;
     mlv_set_timestamp((mlv_hdr_t*)&vidf_hdr, mlv_start_timestamp);
+    slots[capture_slot].crop_x = (skip_x + 7) & ~7;
+    slots[capture_slot].crop_y = skip_y & ~1;
     vidf_hdr.cropPosX = (skip_x + 7) & ~7;
     vidf_hdr.cropPosY = skip_y & ~1;
     vidf_hdr.panPosX = skip_x;
@@ -3637,6 +3648,132 @@ void process_frame(int next_fullsize_buffer_pos)
     return;
 }
 
+/* ---- Bolex stabilizer ("tripod mode") ------------------------------------------------------
+ * The window recorded from the raw buffer follows the scene: each frame, the Live View picture
+ * (Canon's x1 view, the same sensor area) is compared with a reference picture, and the window
+ * is moved by as much as the picture moved.  The arithmetic is in src/bolex-stab.h; on a
+ * computer, tests/stab_tests.c runs it on simulated hand shake.
+ *   mode 1: the move measured on the newest Live View picture is used for the frame being
+ *           cut now; mode 2: used one frame later.  Which one matches the raw frames is
+ *           found on the camera (wrong timing makes the shake worse instead of better).
+ * Steps: 8 raw pixels sideways, 2 lines up/down (what the compressor can start from). */
+#define STAB_LEAK 96            /* back to the centre with a ~5 s time constant at 18 fps */
+
+#ifndef YUV422_LV_BUFFER_DISPLAY_ADDR
+/* EOS M 2.0.2: the Live View buffer on screen (modules are built without the platform consts.h;
+ * crop_rec.c uses the same address) */
+#define YUV422_LV_BUFFER_DISPLAY_ADDR (*(uint32_t*)(0x3E650+0x118))
+#endif
+
+static int32_t stab_col[STAB_MAX_BINS], stab_row[STAB_MAX_BINS];           /* this frame */
+static int32_t stab_ref_col[STAB_MAX_BINS], stab_ref_row[STAB_MAX_BINS];   /* the reference */
+static int stab_ncol = 0, stab_nrow = 0;
+static struct stab_tracker stab_tr;
+static struct stab_state stab_st;
+static int stab_used_x = 0, stab_used_y = 0;    /* the offset in the frames being recorded */
+
+/* for the info line (crop_rec.c) */
+int bolex_stab_offset(int * x, int * y)
+{
+    *x = stab_used_x;
+    *y = stab_used_y;
+    return 1;
+}
+
+/* column and row sums of the luma of the picture on screen; 0 when there is none */
+static int stab_profiles(int32_t * col, int32_t * row, int * ncol, int * nrow)
+{
+    if (!YUV422_LV_BUFFER_DISPLAY_ADDR)
+        return 0;
+    int w = vram_lv.width, h = vram_lv.height, p = vram_lv.pitch;
+    if (w < 320 || h < 200 || p < w * 2)
+        return 0;
+
+    /* the middle 80% of the picture; columns 2 pixels apart (one UYVY word), rows 4 apart */
+    int x0 = (w / 10) & ~1, y0 = h / 10;
+    int nc = MIN((w - 2 * x0) / 2, STAB_MAX_BINS);
+    int nr = MIN((h - 2 * y0) / 4, STAB_MAX_BINS);
+    uint8_t * buf = (uint8_t *) UNCACHEABLE(YUV422_LV_BUFFER_DISPLAY_ADDR);
+
+    for (int i = 0; i < nc; i++)
+        col[i] = 0;
+    for (int j = 0; j < nr; j++)
+    {
+        uint32_t * line = (uint32_t *)(buf + (y0 + 4 * j) * p + x0 * 2);
+        int32_t sum = 0;
+        for (int i = 0; i < nc; i++)
+        {
+            uint32_t uyvy = line[i];
+            int luma = (uyvy >> 8) & 0xFF;      /* Y of the first pixel of the pair */
+            col[i] += luma;
+            sum += luma;
+        }
+        row[j] = sum;
+    }
+    *ncol = nc;
+    *nrow = nr;
+    return 1;
+}
+
+/* LiveView task, every frame: measure the move and place the window */
+static REQUIRES(LiveViewTask)
+void bolex_stab_step(void)
+{
+    static int was_recording = 0;
+    int mode = bolex_stab_mode();
+
+    if (!mode || !cam_eos_m || !lv || !is_movie_mode() || lv_dispsize != 1 || !raw_video_enabled)
+    {
+        memset(&stab_tr, 0, sizeof(stab_tr));
+        memset(&stab_st, 0, sizeof(stab_st));
+        stab_used_x = stab_used_y = 0;
+        return;
+    }
+
+    /* every recording starts with the window in the middle */
+    int recording = RAW_IS_RECORDING;
+    if (recording && !was_recording)
+        memset(&stab_st, 0, sizeof(stab_st));
+    was_recording = recording;
+
+    int prev_off_x = stab_st.off_x, prev_off_y = stab_st.off_y;
+
+    int nc, nr;
+    if (stab_profiles(stab_col, stab_row, &nc, &nr))
+    {
+        /* a different picture size: start from a new reference */
+        if (nc != stab_ncol || nr != stab_nrow)
+            stab_tr.have_ref = 0;
+        stab_ncol = nc;
+        stab_nrow = nr;
+
+        /* against the reference: search 8 column bins / 4 row bins around the last place;
+         * a new reference beyond 30 / 6 bins (~140 / ~35 raw pixels, about the margin) */
+        int dx16, dy16;
+        stab_track(&stab_tr, stab_ref_col, stab_ref_row, stab_col, stab_row, nc, nr,
+                   8, 4, 30, 6, &dx16, &dy16);
+
+        /* bins x16 -> Live View pixels x16 (2 per column bin, 4 per row bin) -> raw x16 */
+        int rx = dx16 * 2 * lv2raw.sx / 1024;
+        int ry = dy16 * 4 * lv2raw.sy / 1024;
+
+        int max_x = ((max_res_x - res_x) / 2 - 8) & ~7;
+        int max_y = ((max_res_y - res_y) / 2 - 2) & ~1;
+        stab_update(&stab_st, rx, ry, MAX(max_x, 0), MAX(max_y, 0), 8, 2, STAB_LEAK);
+    }
+
+    stab_used_x = (mode == 2) ? prev_off_x : stab_st.off_x;
+    stab_used_y = (mode == 2) ? prev_off_y : stab_st.off_y;
+
+    /* the window: centred, then moved */
+    int left_margin = (raw_info.active_area.x1 + 7) & ~7;
+    int top_margin  = (raw_info.active_area.y1 + 1) & ~1;
+    int sx = left_margin + (max_res_x - res_x) / 2 + stab_used_x;
+    int sy = top_margin  + (max_res_y - res_y) / 2 + stab_used_y;
+    skip_x = COERCE(sx, raw_info.active_area.x1, raw_info.active_area.x2 - res_x);
+    skip_y = COERCE(sy, raw_info.active_area.y1, raw_info.active_area.y2 - res_y);
+}
+
 static REQUIRES(LiveViewTask)
 unsigned int FAST raw_rec_vsync_cbr(unsigned int unused)
 {
@@ -3648,6 +3785,9 @@ unsigned int FAST raw_rec_vsync_cbr(unsigned int unused)
  
     /* panning window is updated when recording, but also when not recording */
     panning_update();
+
+    /* Bolex tripod mode: the window follows the scene */
+    bolex_stab_step();
 
     if (!RAW_IS_RECORDING) return 0;
     if (!raw_lv_settings_still_valid()) { raw_recording_state = RAW_FINISHING; return 0; }

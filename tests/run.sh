@@ -36,8 +36,6 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "#define BOLEX_ANGLE"
   python3 tests/extract.py $CR line     "#define BOLEX_SHUTTER_X1000"
   python3 tests/extract.py $CR function bolex_shutter_steps
-  python3 tests/extract.py $CR block    "struct bolex_reading"
-  python3 tests/extract.py $CR line     "#define BOLEX_READINGS"
 } > "$OUT/bolex_snippets.h"
 python3 tests/extract.py modules/mlv_lite/mlv_lite.c function calc_res_y > "$OUT/bolex_mlv_snippets.h"
 
@@ -47,7 +45,7 @@ if grep -n '"Super 8 Actual"\|"A35 Anamorphic 2x"' modules/crop_rec/crop_rec.c m
 fi
 
 # 3. build and run
-for t in film settings menu gain ltc bolex; do
+for t in film settings menu gain ltc bolex stab; do
   echo "== $t"
   gcc $CF -o "$OUT/$t" tests/${t}_tests.c -lm
   "$OUT/$t"

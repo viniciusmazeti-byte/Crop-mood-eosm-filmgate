@@ -65,31 +65,6 @@ int main(void)
     /* 3x5: Canon x1 raw is 727 lines, 28 on top and 3 at the bottom are not picture */
     check_43("4:3 3x5", (727 - 28 - 3) & ~1, 4);
 
-    /* reading tests: each one changes the full-height 3x3 readout (1736x1160, 1 line of 3) */
-    CHECK(BOLEX_READINGS == 7, "%d readings", BOLEX_READINGS);
-    CHECK(bolex_readings[0].rows == 0, "reading 0 is the normal one (no preset)");
-    CHECK(bolex_readings[1].rows == 1160 && bolex_readings[1].skip == 3 && !bolex_readings[1].prev,
-          "U1 must be the unchanged full-height readout");
-    for (int i = 1; i < BOLEX_READINGS; i++)
-    {
-        const struct bolex_reading * r = &bolex_readings[i];
-        CHECK(r->rows > 0 && r->rows <= 1160 && (r->rows & 1) == 0, "%s: %d lines", r->name, r->rows);
-        CHECK(r->skip >= 3 && r->skip <= 16, "%s: skip %d", r->name, r->skip);
-        /* the readings that fit the sensor's 3480 lines record a true 4:3 frame */
-        if (r->rows * r->skip <= 3480)
-        {
-            check_43(r->name, r->rows, r->skip - 1);
-            if (r->skip > 3)
-                CHECK(r->rows * r->skip >= 3400, "%s covers only %d of the sensor's lines", r->name, r->rows * r->skip);
-        }
-    }
-    /* one change per step: U2 only the skip, U3 only the lines, U4 only the screen path */
-    CHECK(bolex_readings[2].rows == 1160 && bolex_readings[2].skip == 5 && !bolex_readings[2].prev, "U2");
-    CHECK(bolex_readings[3].rows == 696 && bolex_readings[3].skip == 5 && !bolex_readings[3].prev, "U3");
-    CHECK(bolex_readings[4].rows == 696 && bolex_readings[4].skip == 5 && bolex_readings[4].prev, "U4");
-    /* U5 / U6 read fewer lines than Canon's x1 (696): that is the point */
-    CHECK(bolex_readings[5].rows < 696 * 3 / 4 && bolex_readings[6].rows < 696 / 2, "fewer lines than 3x5");
-
     printf("bolex_tests: %d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;
 }
