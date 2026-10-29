@@ -6837,6 +6837,12 @@ static void slim_cover_hold_and_release(int hold_ms)
  * 18 fps, so it plays slowed down to 56%.  The hand shake, filmed in more frames and played
  * slower, looks smoother than at 18.
  *
+ * The FPS override can only slow Canon's frame rate down (Timer B never goes below Canon's),
+ * so Canon must run faster than 32: its movie size has to be 1280x720 at 60p (50p in PAL).
+ * From Canon's 30p the camera only got to 31.72 fps, applied late, with a frozen screen at
+ * times and blue/pink first frames (camera test).  Until Canon is at 50/60p the override
+ * stays off and the info line says what to set.
+ *
  * Fixed, no choices: 32 fps, played at 18, 10-bit lossless, ISO 100, 360 degree shutter
  * (1/32 s), no sound.  INFO does nothing (it is kept for the rewind).
  *
@@ -6895,6 +6901,12 @@ static void bolex_fixed_settings(void)
     tapdisp = 0;
 }
 
+/* Canon runs faster than the Bolex speed (720p 50/60), so the FPS override can slow it down */
+static int bolex_canon_fast_enough(void)
+{
+    return video_mode_fps * 1000 > BOLEX_FPS_X1000;
+}
+
 /* INFO: does nothing (it is kept for the rewind) */
 static void bolex_info_pressed(void)
 {
@@ -6927,8 +6939,9 @@ static void bolex_step(void)
 
     bolex_fixed_settings();
 
-    /* the plain x1 view at 32 fps (FPS override).  x10 stays allowed, for focusing. */
-    fps_override_force(1, BOLEX_FPS_X1000);
+    /* the plain x1 view at 32 fps (FPS override), slowed down from Canon's 50/60p only.
+     * x10 stays allowed, for focusing. */
+    fps_override_force(bolex_canon_fast_enough(), BOLEX_FPS_X1000);
     if (lv_dispsize == 5)
     {
         static int last_zoom = 0;
@@ -6990,6 +7003,14 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     if (!bolex_fmt || !is_movie_mode())
     {
         item->width = 0;
+        return;
+    }
+
+    /* Canon at 30p: the Bolex speed cannot be reached; say what to change */
+    if (!bolex_canon_fast_enough())
+    {
+        snprintf(buffer, 64, "MENU CANON: TAMANHO 1280x720 60P (OU 50P)");
+        item->color_fg = COLOR_YELLOW;
         return;
     }
 
