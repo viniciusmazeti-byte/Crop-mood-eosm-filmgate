@@ -118,6 +118,10 @@ static int a35_short_readout = 0;   /* 48 fps on A35 16:9 / 1.85: 1736x958 reado
 
 /* Bolex (see the "Bolex" section further down) */
 static int bolex_fmt = 0;       /* BOLEX_4_3 (2) once crop_rec_init has run; 0 = not yet */
+/* Bolex 32 fps on the 3x3 3:2 (A35) readout: the line time of its 24/30 fps (Timer A 0x20F),
+ * a longer frame: 32 MHz / (0x210 * 0x766) = 31.999 fps */
+#define BOLEX_3X3_TIMER_A   0x20F
+#define BOLEX_3X3_TIMER_B   0x765
 
 /* customized buttons variables
  * EOS M slim defaults:
@@ -2609,6 +2613,8 @@ static inline uint32_t reg_override_3X3(uint32_t reg, uint32_t old_val)
         /* 18 fps: same line time as 23.976, longer frame:
          * 32 MHz / (0x210 * 0xD27) = 18.000 fps.  Like the 1:1 18 fps, only Timer B changes. */
         if (Framerate_18) {TimerA = 0x20F; TimerB = 0xD26;}
+        /* Bolex: 32 fps, whatever the fps menu says (see BOLEX_3X3_TIMER_A) */
+        if (bolex_fmt) {TimerA = BOLEX_3X3_TIMER_A; TimerB = BOLEX_3X3_TIMER_B;}
         
         Preview_H     = 1728;      // from mv1080 mode
         Preview_V     = 1152;      // from mv1080 mode
@@ -6829,19 +6835,24 @@ static void slim_cover_hold_and_release(int hold_ms)
 /* ---- Bolex ---------------------------------------------------------------------------------
  * This build turns the EOS M into a Bolex: one format, everything fixed, no ML menu.
  *
- *   4:3  crop_rec presets OFF: Canon's own x1 movie Live View, which reads the sensor 3x5
- *        (3 columns binned, 1 line of 5).
+ *   4:3  crop_rec 3x3 preset on the 3:2 (A35) readout: 1736x1160, Canon's x5 state, 3 columns
+ *        binned, 1 line of 3.  mlv_lite records the centre 1104x828 (square pixels, 4:3),
+ *        sized for a Bolex 25 mm C-mount: inside its image circle.
  *
- * Like a Bolex run at 32 fps and projected at 18: the camera films at 32 fps (ML FPS override
- * in "Low light" mode, Canon's timer A and line time kept), and mlv_lite labels the file
- * 18 fps, so it plays slowed down to 56%.  The hand shake, filmed in more frames and played
- * slower, looks smoother than at 18.
+ *        Before: Canon's own x1 view, read 3x5 (1 line of 5): less rolling shutter (~8 ms over
+ *        the frame against ~13.7 ms here), but aliasing, noise and a 5/3 stretch - the picture
+ *        was poor.  Reading fewer lines or columns at the sensor would not lower the rolling
+ *        shutter inside the frame (only the line time does, and this one is close to the
+ *        EOS M minimum, Timer A 0x1FF).
  *
- * The FPS override can only slow Canon's frame rate down (Timer B never goes below Canon's),
- * so Canon must run faster than 32: its movie size has to be 1280x720 at 60p (50p in PAL).
- * From Canon's 30p the camera only got to 31.72 fps, applied late, with a frozen screen at
- * times and blue/pink first frames (camera test).  Until Canon is at 50/60p the override
- * stays off and the info line says what to set.
+ * Like a Bolex run at 32 fps and projected at 18: the camera films at 32 fps (crop_rec's own
+ * timers, BOLEX_3X3_TIMER_A/B: only Timer B is longer than at 30 fps, so the line time stays)
+ * and mlv_lite labels the file 18 fps, so it plays slowed down to 56%.
+ *
+ * Exposure: no FPS override (with a crop_rec preset it scaled the exposure twice: 1/771, camera
+ * test).  crop_rec alone turns Canon's shutter into the sensor's exposure; with the full
+ * shutter range Canon's slowest, 1/30, is the whole frame: 360 degrees.  Canon's movie size
+ * must be 1920x1080 at 24/25/30p for that (otherwise the info line says what to set).
  *
  * Fixed, no choices: 32 fps, played at 18, 14-bit lossless, ISO 100, 360 degree shutter
  * (1/32 s), no sound.  INFO does nothing.  (Tried and removed: mlv_lite's Framing preview,
@@ -6881,9 +6892,18 @@ static void bolex_fixed_settings(void)
     if (!bolex_fmt)
         return;
 
-    /* no crop_rec preset: Canon's own x1 reading */
-    if (crop_preset_index != 0)
-        crop_preset_index = 0;
+    /* the readout: crop_rec 3x3 on the 3:2 (A35) readout (slim menu state kept in step) */
+    crop_preset_3x3_res_menu = 2;       /* mv1080 3:2 = A35 readout */
+    crop_preset_ar_menu = 4;            /* 3:2 */
+    crop_preset_fps_menu = 2;           /* 30 fps menu entry; the Bolex timers replace it */
+    slim_film_fmt = 0;                  /* Academy 35mm */
+    slim_film_frame_set(0, 0);
+    slim_mode_ui = 2;                   /* 3x3 */
+    if (crop_preset_index != 3)
+        crop_preset_index = 3;          /* 3x3 */
+
+    /* exposure from crop_rec alone, Canon's slowest shutter = the whole frame */
+    shutter_range = 1;
 
     /* 14-bit: Canon's own depth, no analog or digital gain trick */
     if (bit_depth_analog != 0)
@@ -6902,34 +6922,16 @@ static void bolex_fixed_settings(void)
     tapdisp = 0;
 }
 
-/* Canon runs faster than the Bolex speed (720p 50/60), so the FPS override can slow it down */
-static int bolex_canon_fast_enough(void)
+/* Canon's movie size is 1920x1080 at 24/25/30p: the readout and the 360 degree exposure
+ * (Canon's 1/30 = the whole frame) are worked out for it */
+static int bolex_canon_mode_ok(void)
 {
-    return video_mode_fps * 1000 > BOLEX_FPS_X1000;
+    return video_mode_resolution == 0 && video_mode_fps <= 30;
 }
 
 /* INFO: does nothing */
 static void bolex_info_pressed(void)
 {
-}
-
-/* raw shutter steps (1/8 EV) that bring a shutter of 1/real to 1/want; + means faster */
-static int bolex_shutter_steps(int real_x1000, int want_x1000)
-{
-    int steps = 0;
-    int r = real_x1000;
-    /* 2^(1/8) = 1.0905; within 4.5% (half a step) counts as on target */
-    while (r > 0 && r < want_x1000 - want_x1000 * 9 / 200 && steps < 48)
-    {
-        r = (int)((int64_t) r * 10905 / 10000);
-        steps++;
-    }
-    while (r > want_x1000 + want_x1000 * 9 / 200 && steps > -48)
-    {
-        r = (int)((int64_t) r * 10000 / 10905);
-        steps--;
-    }
-    return steps;
 }
 
 /* Live View, not recording, no menu: keep the video mode, 32 fps, ISO 100 and 360 degrees */
@@ -6940,20 +6942,8 @@ static void bolex_step(void)
 
     bolex_fixed_settings();
 
-    /* the plain x1 view at 32 fps (FPS override), slowed down from Canon's 50/60p only.
-     * x10 stays allowed, for focusing. */
-    fps_override_force(bolex_canon_fast_enough(), BOLEX_FPS_X1000);
-    if (lv_dispsize == 5)
-    {
-        static int last_zoom = 0;
-        int now = get_ms_clock();
-        if (now - last_zoom > 2000)
-        {
-            last_zoom = now;
-            set_zoom(1);
-        }
-        return;
-    }
+    /* the 32 fps come from crop_rec's timers: the FPS override stays off */
+    fps_override_force(0, BOLEX_FPS_X1000);
 
 #ifdef CONFIG_EOSM
     if (eosm_lv_guard_busy)
@@ -6977,23 +6967,16 @@ static void bolex_step(void)
         return;
     }
 
-    /* 360 degrees.  Measured, not computed: what Canon's shutter value means depends on the
-     * mode (crop_rec timers, FPS override), so read what the sensor really uses and step the
-     * shutter until it matches.  The EOS M shutter lock (movtweaks.c) holds it afterwards. */
-    static int tries = 0;
-    int real = get_current_shutter_reciprocal_x1000();
-    int steps = bolex_shutter_steps(real, BOLEX_SHUTTER_X1000);
-    if (real <= 0 || steps == 0)
-    {
-        tries = 0;      /* on target; correct again if it ever drifts */
+    /* 360 degrees: Canon at 1/30, its slowest, which crop_rec makes the whole frame (full
+     * shutter range, see bolex_fixed_settings).  The EOS M shutter lock (movtweaks.c) holds it. */
+    if (!bolex_canon_mode_ok())
         return;
+    int raw30 = shutterf_to_raw(1.0f / 30);
+    if (lens_info.raw_shutter != raw30)
+    {
+        shutter_lock_accept(raw30);
+        lens_set_rawshutter(raw30);
     }
-    if (tries >= 8)
-        return;         /* Canon does not take the value: stop trying (shown on screen) */
-    tries++;
-    int raw = COERCE((int) lens_info.raw_shutter + steps, 16, 152);
-    shutter_lock_accept(raw);
-    lens_set_rawshutter(raw);
 }
 
 /* the one line at the bottom of the screen (test builds: the settings, to check them) */
@@ -7007,16 +6990,18 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
         return;
     }
 
-    /* Canon at 30p: the Bolex speed cannot be reached; say what to change */
-    if (!bolex_canon_fast_enough())
+    /* Canon in another movie size: say what to change */
+    if (!bolex_canon_mode_ok())
     {
-        snprintf(buffer, 64, "MENU CANON: TAMANHO 1280x720 60P (OU 50P)");
+        snprintf(buffer, 64, "MENU CANON: TAMANHO 1920x1080 30P");
         item->color_fg = COLOR_YELLOW;
         return;
     }
 
+    /* the shutter is the whole frame (360 degrees); Canon's measured value does not see
+     * crop_rec's exposure, so show the frame time */
     int fps = fps_get_current_x1000();
-    int sh = get_current_shutter_reciprocal_x1000();
+    int sh = fps * 360 / BOLEX_ANGLE;
 
     snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d  ISO %d  14-BIT%s",
         fps / 1000, fps % 1000,
@@ -8407,6 +8392,7 @@ static unsigned int crop_rec_init()
         /* Bolex: one format; everything else is fixed */
         bolex_fmt = BOLEX_4_3;
         bolex_fixed_settings();
+        fps_override_force(0, BOLEX_FPS_X1000);    /* earlier Bolex builds saved it on */
         lvinfo_add_items(bolex_info_items, COUNT(bolex_info_items));
 
         /* Flat Movie-page crop settings (no Crop Mode submenu / Customize Buttons). */

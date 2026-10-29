@@ -37,33 +37,27 @@ int main(void)
     CHECK(BOLEX_ANGLE == 360, "Bolex shutter angle %d", BOLEX_ANGLE);
     CHECK(want == 32000, "360 degrees at 32 fps must be 1/32 s, got 1/%d.%03d", want / 1000, want % 1000);
 
-    /* on target (and within half a step of it): no change */
-    CHECK(bolex_shutter_steps(want, want) == 0, "on target");
-    CHECK(bolex_shutter_steps(want * 1040 / 1000, want) == 0, "+4%% counts as on target");
-    CHECK(bolex_shutter_steps(want * 960 / 1000, want) == 0, "-4%% counts as on target");
+    /* 32 fps from crop_rec's timers on the 3x3 3:2 readout: 32 MHz / ((A+1) * (B+1)) */
+    double fps = 32e6 / ((BOLEX_3X3_TIMER_A + 1.0) * (BOLEX_3X3_TIMER_B + 1.0));
+    CHECK(fabs(fps - 32.0) < 0.01, "3x3 timers give %.4f fps, not 32", fps);
+    printf("3x3 timers: %.4f fps\n", fps);
 
-    /* one stop too slow (1/16): 8 steps faster; one stop too fast (1/64): 8 steps slower */
-    CHECK(bolex_shutter_steps(want / 2, want) == 8, "1/16 -> %d steps, expected 8", bolex_shutter_steps(want / 2, want));
-    CHECK(bolex_shutter_steps(want * 2, want) == -8, "1/64 -> %d steps, expected -8", bolex_shutter_steps(want * 2, want));
+    /* the line time of the proven 24/30 fps on this readout (rolling shutter unchanged) */
+    CHECK(BOLEX_3X3_TIMER_A == 0x20F, "Timer A 0x%X, not the 24/30 fps line time 0x20F", BOLEX_3X3_TIMER_A);
 
-    /* nothing measured yet: no change */
-    CHECK(bolex_shutter_steps(0, want) == 0, "no reading");
+    /* the frame is longer than the 1189-line readout (RAW_V 0x4A5) plus blanking, and not
+     * shorter than the 36 fps frame already used on this readout (Timer B 0x693) */
+    CHECK(BOLEX_3X3_TIMER_B > 0x693, "Timer B 0x%X shorter than the 36 fps one", BOLEX_3X3_TIMER_B);
 
-    /* a camera whose shutter follows the raw value exactly (1/8 EV per step): starting anywhere
-     * from 4 stops slow to 4 stops fast, one correction lands within half a step of 1/32 */
-    for (int off = -32; off <= 32; off++)
-    {
-        double real = want * pow(2.0, off / 8.0);
-        int steps = bolex_shutter_steps((int) real, want);
-        double after = real * pow(2.0, steps / 8.0);
-        CHECK(fabs(after / want - 1.0) <= 0.045, "start %+d steps: after %d steps 1/%.2f", off, steps, after / 1000);
-    }
+    /* rolling shutter over the recorded 828 lines: ~13.7 ms */
+    double rs_ms = 828 * (BOLEX_3X3_TIMER_A + 1.0) / 32e6 * 1000;
+    printf("rolling shutter over the frame: %.1f ms\n", rs_ms);
+    CHECK(rs_ms < 14.0, "rolling shutter %.1f ms", rs_ms);
 
-    /* the steps never run away */
-    CHECK(bolex_shutter_steps(1, want) <= 48, "very slow reading is capped");
-    CHECK(bolex_shutter_steps(2000000000 / 2, want) >= -48, "very fast reading is capped");
-
-    /* 3x5: Canon x1 raw is 727 lines, 28 on top and 3 at the bottom are not picture */
+    /* 3x3 3:2 readout: 1160 picture lines (square pixels) */
+    check_43("4:3 3x3", 1160, 2);
+    /* the width also stays inside the old 3x5 view (Canon x1 raw is 727 lines, 28 on top and
+     * 3 at the bottom are not picture), should the Bolex go back to it */
     check_43("4:3 3x5", (727 - 28 - 3) & ~1, 4);
 
     /* the width suits the raw format (8 pixels) and the lossless encoder (16) */
