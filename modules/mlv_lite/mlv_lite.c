@@ -112,7 +112,7 @@ extern int WEAK_FUNC(morehack) more_hacks;
 
 /* Bolex build (src/gui-common.c, core): the performance settings below stay fixed (no ML menu) */
 extern int bolex_build;
-#define BOLEX_WARM_UP 4     /* card warm-up at start: 8 MB << 4 = 128 MB written and deleted */
+#define BOLEX_WARM_UP 0     /* card warm-up: OFF, as in the user's crop mood setup */
 
 static int infotoggle = 0; /* coming from crop_rec.c */
 extern int WEAK_FUNC(infotoggle) INFO_button;
@@ -981,11 +981,10 @@ void update_cropping_offsets()
     }
 }
 
-/* Bolex recorded width: the whole 1620p readout (crop_rec 1x1, 2160x1620, 9.3 x 7 mm of
- * sensor, about the 16 mm film gate), so a Bolex C-mount lens covers it.
- * (Earlier: 1104 of the 3x5 / 3x3 readouts, 3 sensor columns each, to stay inside the 25 mm's
- * image circle: black started at ~76% of a 1536-wide frame's half diagonal, 1104 is 72%.) */
-#define BOLEX_RES_X 2160
+/* Bolex recorded width: the centre 4:3 of dannephoto's 976p (3x3, 1736x976): 1296x972.
+ * (Earlier: 1104 of the 3x5 / 3x3 3:2 readouts, sized for the 25 mm's image circle - black
+ * started at ~76% of a 1536-wide frame's half diagonal; then the whole 1620p, 2160.) */
+#define BOLEX_RES_X 1296
 
 static REQUIRES(settings_sem)
 void update_resolution_params()
@@ -1018,7 +1017,7 @@ void update_resolution_params()
     int num = aspect_ratio_presets_num[aspect_ratio_index];
     int den = aspect_ratio_presets_den[aspect_ratio_index];
 
-    /* Bolex 4:3: BOLEX_RES_X wide (centred), and as high as gives 4:3: 2160x1620 on the 1620p
+    /* Bolex 4:3: BOLEX_RES_X wide (centred), and as high as gives 4:3: 1296x972 on the 976p
      * readout (square pixels).  On a stretched readout (3x5) the RAWC block says by how much. */
     if (bolex_format())
     {
@@ -2490,11 +2489,11 @@ static void bolex_raw_settings(void)
     raw_video_enabled = 1;
     output_format = OUTPUT_14BIT_LOSSLESS;
 
-    /* performance, as set in dannephoto's crop mood for long takes (no ML menu here) */
+    /* performance: the user's crop mood setup (photos of its menus; no ML menu here) */
     kill_gd = 1;            /* no ML drawing while recording */
     small_hacks = 2;        /* More: Canon GUI slowed, AE/AWB task suspended while recording */
     use_srm_memory = 1;     /* more frame buffers */
-    preview_mode = 1;       /* Canon's real-time view (the Framing preview froze, camera test) */
+    preview_mode = 2;       /* Framing, as in the user's crop mood setup on this 976p readout */
     preview_toggle = 0;
     warm_up = BOLEX_WARM_UP;
 
@@ -5580,7 +5579,7 @@ static unsigned int raw_rec_init()
 
     lvinfo_add_items (info_items, COUNT(info_items));
 
-    /* Bolex: the card is always warmed up at start (dannephoto's crop mood option) */
+    /* Bolex: card warm-up fixed (BOLEX_WARM_UP) */
     if (bolex_build)
         warm_up = BOLEX_WARM_UP;
 

@@ -118,6 +118,10 @@ static int a35_short_readout = 0;   /* 48 fps on A35 16:9 / 1.85: 1736x958 reado
 
 /* Bolex (see the "Bolex" section further down) */
 static int bolex_fmt = 0;       /* BOLEX_4_3 (2) once crop_rec_init has run; 0 = not yet */
+/* Bolex 32 fps on dannephoto's 976p (3x3 High FPS 16:9) readout: its line time (Timer A 0x20F),
+ * a longer frame: 32 MHz / (0x210 * 0x766) = 31.999 fps */
+#define BOLEX_3X3_TIMER_A   0x20F
+#define BOLEX_3X3_TIMER_B   0x765
 
 
 /* customized buttons variables
@@ -2475,6 +2479,13 @@ static inline uint32_t reg_override_3X3(uint32_t reg, uint32_t old_val)
                 TimerB        = 0x501;
                 Preview_V     = 958;
                 YUV_HD_S_V    = 0x1050165;
+            }
+
+            /* Bolex: 32 fps on this 976p readout (see BOLEX_3X3_TIMER_A) */
+            if (bolex_fmt && is_EOSM)
+            {
+                TimerA        = BOLEX_3X3_TIMER_A;
+                TimerB        = BOLEX_3X3_TIMER_B;
             }
         }
         
@@ -6830,39 +6841,33 @@ static void slim_cover_hold_and_release(int hold_ms)
 /* ---- Bolex ---------------------------------------------------------------------------------
  * This build turns the EOS M into a Bolex: one format, everything fixed, no ML menu.
  *
- *   4:3  crop_rec 1x1 preset 1620p: 2160x1620, every pixel read (no binning, no line
- *        skipping), Canon's x5 state.  9.3 x 7 mm of sensor, almost exactly the 16 mm film
- *        gate (10.3 x 7.5 mm): a Bolex C-mount lens covers it, as on the Bolex.  Recorded whole.
+ *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
+ *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
+ *        the nicest picture: 14-bit lossless, Framing preview, Kill Global Draw, Small Hacks
+ *        More, SRM memory, SD 240 MHz.  mlv_lite records the centre 1296x972 (4:3).
  *
- *        Before (camera tests): Canon's own x1 view read 3x5 (1 line of 5) - aliasing and a 5/3
- *        stretch; then the 3x3 3:2 readout at 32 fps, recorded 1104x828 to stay inside the 25 mm
- *        circle - still not a nice picture (small frame, the lens used at its edge).
+ *        Before (camera tests): Canon's x1 3x5 view (aliasing, 5/3 stretch); the 3x3 3:2
+ *        readout at 32 fps, 1104x828 (small frame); 1620p 1x1 (red focus-pixel grid, ~1 s
+ *        takes).
  *
- *        Costs: at most 23.976 / 25 fps on this readout (29.97 was tried: no LCD image); a
- *        rolling shutter of ~32 ms over the frame (1620 lines of Timer A 0x279); ~85 Mpixel/s,
- *        more than the card takes, so 10-bit (crop_rec's analog gain) for the longest clips.
- *
- * Like a Bolex run faster than it is projected: the camera films at 23.976 fps (dannephoto's
- * 1620p timers) and mlv_lite labels the file 18 fps, so it plays slowed down to 75%.
+ * Like a Bolex run at 32 fps and projected at 18: 976p's line time (Timer A 0x20F), a longer
+ * frame (BOLEX_3X3_TIMER_B): 31.999 fps; mlv_lite labels the file 18 fps (plays at 56%).
  *
  * Exposure: no FPS override (with a crop_rec preset it scaled the exposure twice: 1/771, camera
  * test).  crop_rec alone turns Canon's shutter into the sensor's exposure; with the full
  * shutter range Canon's slowest, 1/30, is the whole frame: 360 degrees.  Canon's movie size
  * must be 1920x1080 at 24/25/30p for that (otherwise the info line says what to set).
+ * ISO 100; the shutter starts at 360 degrees and the rear dial changes it.
  *
- * Fixed, no choices: 23.976 fps, played at 18, 10-bit lossless, ISO 100, 360 degree shutter
- * (1/24 s), no sound.  INFO does nothing.  (Tried and removed: mlv_lite's Framing preview,
- * by INFO or always on - on the camera it showed nothing, then froze on the first frame.)
- *
- * (Tried and removed: readings with fewer lines, 3x7 / 3x10 - the files record, but the screen
- * of every reading Canon or crop mood never calibrated stays black or hangs; and an in-camera
+ * INFO does nothing.  (Tried and removed: readings with fewer lines, 3x7 / 3x10 - the screen of
+ * every reading Canon or crop mood never calibrated stays black or hangs; and an in-camera
  * stabilizer moving the recorded window - on the camera it made the picture jolt.)
  */
 #define BOLEX_4_3           2   /* the only format; 0 = not a Bolex build */
-#define BOLEX_FPS_X1000     24000   /* camera speed (23.976); the file plays at BOLEX_PLAY_FPS */
+#define BOLEX_FPS_X1000     32000   /* camera speed (31.999); the file plays at BOLEX_PLAY_FPS */
 #define BOLEX_PLAY_FPS      18      /* projection speed written in the file */
 #define BOLEX_ANGLE         360
-#define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 360 degrees: 1/24 s, as 1/x * 1000 */
+#define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 360 degrees: 1/32 s, as 1/x * 1000 */
 
 /* src/gui-common.c (Bolex core): 1 once Canon has sent an INFO release.  The EOS M may not
  * send one at all; the rewind (hold INFO) needs to know.  Shown on screen. */
@@ -6920,23 +6925,22 @@ static void bolex_fixed_settings(void)
     if (!bolex_fmt)
         return;
 
-    /* the readout: crop_rec 1x1 1620p, 4:3 (slim menu state kept in step) */
-    crop_preset_1x1_res_menu = 6;       /* CROP_1620p */
-    crop_preset_fps_menu = 0;           /* 23.976 */
-    slim_mode_ui = 0;                   /* 1x1 */
-    slim_1x1_ar = 4;                    /* 4:3 */
-    slim_unified_preset = 0;
-    if (crop_preset_index != 1)
-        crop_preset_index = 1;          /* 1x1 */
+    /* the readout: dannephoto's 976p, crop_rec 3x3 High FPS 16:9 (slim menu state in step) */
+    crop_preset_3x3_res_menu = 0;       /* High FPS */
+    crop_preset_ar_menu = 0;            /* 16:9: 1736x976 */
+    crop_preset_fps_menu = 2;           /* 30 (not 24: no 23.976 snapping); the Bolex timers replace it */
+    slim_mode_ui = 2;                   /* 3x3 */
+    if (crop_preset_index != 3)
+        crop_preset_index = 3;          /* 3x3 */
 
     /* exposure from crop_rec alone, Canon's slowest shutter = the whole frame */
     shutter_range = 1;
 
-    /* 10-bit (crop_rec's analog gain): 1620p is more than the card takes even so */
-    if (bit_depth_analog != 3)
+    /* 14-bit: Canon's own depth, no analog gain trick (as in the user's crop mood setup) */
+    if (bit_depth_analog != 0)
     {
-        bit_depth_analog = 3;
-        slim_bit_depth_ui = 0;
+        bit_depth_analog = 0;
+        slim_bit_depth_ui = 3;
         raw_invalidate_lv_calibration();
     }
 
@@ -7047,7 +7051,7 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     int exp_us = bolex_exposure_us(canon_us, fps);
     int angle = (int)((int64_t) exp_us * fps * 360 / 1000000000LL);
 
-    snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  10-BIT",
+    snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT",
         fps / 1000, fps % 1000,
         BOLEX_PLAY_FPS,
         exp_us > 0 ? (1000000 + exp_us / 2) / exp_us : 0,

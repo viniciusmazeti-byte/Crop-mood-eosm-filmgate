@@ -33,11 +33,18 @@ int main(void)
 {
     const int want = BOLEX_SHUTTER_X1000;
 
-    /* filmed at 23.976 (1620p's timers), played at 18; 360 degrees at 24 fps is 1/24 s */
-    CHECK(BOLEX_FPS_X1000 == 24000, "Bolex camera speed %d", BOLEX_FPS_X1000);
+    /* filmed at 32 fps (976p readout, Bolex timers), played at 18; 360 degrees is 1/32 s */
+    CHECK(BOLEX_FPS_X1000 == 32000, "Bolex camera speed %d", BOLEX_FPS_X1000);
+    double fps = 32e6 / ((BOLEX_3X3_TIMER_A + 1.0) * (BOLEX_3X3_TIMER_B + 1.0));
+    CHECK(fabs(fps - 32.0) < 0.01, "976p timers give %.4f fps, not 32", fps);
+    CHECK(BOLEX_3X3_TIMER_A == 0x20F, "Timer A 0x%X, not 976p's line time 0x20F", BOLEX_3X3_TIMER_A);
+    /* the frame (Timer B lines) is longer than the 976p readout (RAW_V 0x3ED) */
+    CHECK(BOLEX_3X3_TIMER_B > 0x3ED + 100, "Timer B 0x%X too short for 1005 lines", BOLEX_3X3_TIMER_B);
+    printf("976p timers: %.4f fps, rolling shutter over 972 lines %.1f ms\n", fps,
+           972 * (BOLEX_3X3_TIMER_A + 1.0) / 32e6 * 1000);
     CHECK(BOLEX_PLAY_FPS == 18, "Bolex projection speed %d", BOLEX_PLAY_FPS);
     CHECK(BOLEX_ANGLE == 360, "Bolex shutter angle %d", BOLEX_ANGLE);
-    CHECK(want == 24000, "360 degrees at 24 fps must be 1/24 s, got 1/%d.%03d", want / 1000, want % 1000);
+    CHECK(want == 32000, "360 degrees at 32 fps must be 1/32 s, got 1/%d.%03d", want / 1000, want % 1000);
 
     /* rear dial: Canon's 1/3 stops from 1/30 to 1/4000, both ways */
     {
@@ -63,14 +70,9 @@ int main(void)
         CHECK(bolex_exposure_us(0, 0) == 0, "no fps");
     }
 
-    /* 1620p 1x1 readout: 1620 picture lines, square pixels, the whole readout recorded */
-    check_43("4:3 1620p", 1620, 0);
-    CHECK(BOLEX_RES_X == 2160, "width %d, not the whole 1620p readout", BOLEX_RES_X);
-
-    /* 2160x1620 of 4.3 um pixels: about the 16 mm film gate (10.26 x 7.49 mm), no larger */
-    double w_mm = BOLEX_RES_X * 0.0043, h_mm = 1620 * 0.0043;
-    printf("1620p: %.2f x %.2f mm of sensor\n", w_mm, h_mm);
-    CHECK(w_mm <= 10.26 && h_mm <= 7.49, "%.2f x %.2f mm is larger than the 16 mm gate", w_mm, h_mm);
+    /* 976p 3x3 readout: 976 picture lines, square pixels, the centre 4:3 recorded */
+    check_43("4:3 976p", 976, 2);
+    CHECK(BOLEX_RES_X == 1296, "width %d", BOLEX_RES_X);
 
     /* the width suits the raw format (8 pixels) and the lossless encoder (16) */
     CHECK(BOLEX_RES_X % 16 == 0, "width %d is not a multiple of 16", BOLEX_RES_X);
