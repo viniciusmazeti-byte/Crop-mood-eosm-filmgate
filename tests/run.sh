@@ -38,9 +38,7 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "#define BOLEX_SHUTTER_X1000"
   python3 tests/extract.py $CR line     "#define BOLEX_3X3_TIMER_A"
   python3 tests/extract.py $CR line     "#define BOLEX_3X3_TIMER_B"
-  python3 tests/extract.py $CR line     "#define BOLEX_RAW_1_30"
-  python3 tests/extract.py $CR line     "#define BOLEX_RAW_1_4000"
-  python3 tests/extract.py $CR function bolex_next_third
+  python3 tests/extract.py $CR line     "#define BOLEX_RAW_SHUTTER"
   python3 tests/extract.py $CR line     "static const int bolex_isos[]"
   python3 tests/extract.py $CR function bolex_iso_step
   python3 tests/extract.py $CR function bolex_exposure_us

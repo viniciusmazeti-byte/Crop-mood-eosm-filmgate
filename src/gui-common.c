@@ -670,12 +670,6 @@ int bolex_info_unpress_seen = 0;
 /* modules (mlv_lite, sd_uhs) read this (weak) to keep the Bolex performance settings fixed */
 int bolex_build = 1;
 
-/* Shutter clicks of the rear dial or the Left / Right arrows, not yet applied (+ = faster).
- * The EOS M shutter lock reverts Canon's own dial changes outside the ML menu, and the Bolex has
- * no ML menu, so they are read here and crop_rec (bolex_step) sets the shutter, 1/3 stop each.
- * (Camera test: with the dial alone the picture darkened for a moment and came back, and the
- * value on screen never changed - so the arrows too, and crop_rec now holds its own target.) */
-int bolex_shutter_clicks = 0;
 
 /* ISO steps of the Up / Down arrows, not yet applied (+ = higher): crop_rec (bolex_step)
  * steps through ISO 100 / 200 / 400 */
@@ -694,14 +688,13 @@ static int handle_bolex_keys(struct event * event)
 
     switch (event->param)
     {
-        /* rear dial and Left / Right arrows: shutter (not while recording; right = faster) */
+        /* rear dial and Left / Right arrows: nothing.  The shutter is fixed (crop_rec, 133
+         * degrees); Canon's dial would change it for a moment until the shutter lock puts it
+         * back (camera test: the picture darkened and came back). */
         case BGMT_WHEEL_RIGHT:
         case BGMT_WHEEL_LEFT:
         case BGMT_PRESS_RIGHT:
         case BGMT_PRESS_LEFT:
-            if (!RECORDING)
-                bolex_shutter_clicks += (event->param == BGMT_WHEEL_RIGHT || event->param == BGMT_PRESS_RIGHT) ? 1 : -1;
-            return 0;
         case BGMT_UNPRESS_RIGHT:
         case BGMT_UNPRESS_LEFT:
             return 0;

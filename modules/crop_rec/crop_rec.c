@@ -6855,9 +6855,12 @@ static void slim_cover_hold_and_release(int hold_ms)
  *
  * Exposure: no FPS override (with a crop_rec preset it scaled the exposure twice: 1/771, camera
  * test).  crop_rec alone turns Canon's shutter into the sensor's exposure; with the full
- * shutter range Canon's slowest, 1/30, is the whole frame: 360 degrees.  Canon's movie size
- * must be 1920x1080 at 24/25/30p for that (otherwise the info line says what to set).
- * ISO 100; the shutter starts at 360 degrees and the rear dial changes it.
+ * shutter range Canon's 1/30 .. 1/4000 spread over the whole frame .. nothing.  Canon's movie
+ * size must be 1920x1080 at 24/25/30p for that (otherwise the info line says what to set).
+ * One shutter, like a Bolex H16 Reflex: ~133 degrees (BOLEX_RAW_SHUTTER, ~1/88 s at 32 fps);
+ * light is set with the lens and ND.  (Tried and removed: 360 degrees with the rear dial /
+ * Left-Right arrows to change it - on the camera the clicks never changed it.)
+ * ISO 100 / 200 / 400 on the Up / Down arrows.
  *
  * INFO does nothing.  (Tried and removed: readings with fewer lines, 3x7 / 3x10 - the screen of
  * every reading Canon or crop mood never calibrated stays black or hangs; and an in-camera
@@ -6866,16 +6869,14 @@ static void slim_cover_hold_and_release(int hold_ms)
 #define BOLEX_4_3           2   /* the only format; 0 = not a Bolex build */
 #define BOLEX_FPS_X1000     32000   /* camera speed (31.999); the file plays at BOLEX_PLAY_FPS */
 #define BOLEX_PLAY_FPS      18      /* projection speed written in the file */
-#define BOLEX_ANGLE         360
-#define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 360 degrees: 1/32 s, as 1/x * 1000 */
+#define BOLEX_ANGLE         133     /* Bolex H16 Reflex; the nearest Canon step gives ~131 */
+#define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 133 degrees: ~1/87 s, as 1/x * 1000 */
 
 /* src/gui-common.c (Bolex core): 1 once Canon has sent an INFO release.  The EOS M may not
  * send one at all; the rewind (hold INFO) needs to know.  Shown on screen. */
 extern int bolex_info_unpress_seen;
 /* src/fps-engio.c (Bolex core): turn the FPS override on at this rate ("Low light"), or off */
 extern void fps_override_force(int enable, int fps_x1000);
-/* src/gui-common.c (Bolex core): rear dial clicks not yet applied, + = faster shutter */
-extern int bolex_shutter_clicks;
 /* src/gui-common.c (Bolex core): Up / Down arrow steps not yet applied, + = higher ISO */
 extern int bolex_iso_clicks;
 /* src/histogram.c: the ML histogram, kept off */
@@ -6890,27 +6891,10 @@ static int bolex_iso_step(int index, int sign)
     return COERCE(index + sign, 0, (int)COUNT(bolex_isos) - 1);
 }
 
-/* Canon raw shutter codes (1/8 EV): 1/30 (crop_rec's whole frame: 360 degrees) .. 1/4000 */
-#define BOLEX_RAW_1_30      96
-#define BOLEX_RAW_1_4000    152
-
-/* the shutter the Bolex holds (bolex_step), and when a click last changed it (info line) */
-static int bolex_raw_target = BOLEX_RAW_1_30;
-static int bolex_shutter_shown = 0;
-
-/* the next Canon 1/3-stop shutter code from raw, one step faster (+1) or slower (-1);
- * the thirds sit at 0, 3 and 5 of every 8 (96 = 1/30, 99 = 1/40, 101 = 1/50, 104 = 1/60) */
-static int bolex_next_third(int raw, int sign)
-{
-    for (int i = 0; i < 8; i++)
-    {
-        raw += sign;
-        int m = raw & 7;
-        if (m == 0 || m == 3 || m == 5)
-            break;
-    }
-    return raw;
-}
+/* The one shutter: Canon raw code 108 (1/8 EV steps: 96 = 1/30, 104 = 1/60, 112 = 1/125), Canon's
+ * "1/90".  crop_rec turns it into ~1/88 s at 32 fps (bolex_exposure_us): ~131 degrees, the Canon
+ * step nearest to a Bolex H16 Reflex's ~133 (107 would give ~143). */
+#define BOLEX_RAW_SHUTTER   108
 
 /* The exposure the sensor really gets, in microseconds, for Canon's shutter (us) at fps_x1000:
  * crop_rec's mapping with the full shutter range in a 24-30p Canon mode (adjust_shutter_blanking:
@@ -7001,26 +6985,29 @@ static void bolex_step(void)
         return;
 #endif
 
-    /* the shutter: a target of our own, 360 degrees (Canon 1/30) at start, moved by the rear
-     * dial / Left-Right arrows, 1/3 stop per click (gui-common.c), 1/30 .. 1/4000.  Held: if
-     * anything else puts Canon's shutter elsewhere, it is set back (camera test: a change came
-     * back to 1/32 within a moment).  The EOS M shutter lock (movtweaks.c) is told first. */
+    /* the one shutter, ~133 degrees (BOLEX_RAW_SHUTTER), held: set again if anything moves it.
+     * The EOS M shutter lock (movtweaks.c) is told first.  If Canon will not take the half
+     * stop (108), the nearest third (107, ~143 degrees) instead; if that fails too, stop
+     * trying rather than fight Canon (each try briefly changes the picture). */
     if (bolex_canon_mode_ok() && lens_info.raw_shutter)
     {
-        while (bolex_shutter_clicks)
-        {
-            int sign = bolex_shutter_clicks > 0 ? 1 : -1;
-            bolex_raw_target = COERCE(bolex_next_third(bolex_raw_target, sign), BOLEX_RAW_1_30, BOLEX_RAW_1_4000);
-            bolex_shutter_clicks -= sign;
-            bolex_shutter_shown = get_ms_clock();
-        }
+        static int target = BOLEX_RAW_SHUTTER;
+        static int tries = 0;
         static int last_set = 0;
         int now = get_ms_clock();
-        if (lens_info.raw_shutter != bolex_raw_target && now - last_set >= 300)
+        if (lens_info.raw_shutter == target)
+            tries = 0;
+        else if (now - last_set >= 300 && tries < 4)
         {
             last_set = now;
-            shutter_lock_accept(bolex_raw_target);
-            lens_set_rawshutter(bolex_raw_target);
+            tries++;
+            shutter_lock_accept(target);
+            lens_set_rawshutter(target);
+            if (tries == 4 && target == BOLEX_RAW_SHUTTER)
+            {
+                target = BOLEX_RAW_SHUTTER - 1;
+                tries = 0;
+            }
         }
     }
 
@@ -7091,10 +7078,6 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
         item->color_fg = COLOR_WHITE;
         return;
     }
-
-    /* a shutter click: the line in yellow for a moment, so it shows it was taken */
-    if (bolex_shutter_shown && get_ms_clock() - bolex_shutter_shown < 1500)
-        item->color_fg = COLOR_YELLOW;
 
     snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT",
         fps / 1000, fps % 1000,

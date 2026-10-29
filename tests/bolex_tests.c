@@ -1,5 +1,6 @@
 /* Tests for the Bolex speeds (32 fps played at 18), its shutter (360 degrees) and its correction in crop_rec.c - run on a computer, see tests/run.sh */
 #include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
 #include <stdint.h>
 
@@ -47,25 +48,31 @@ int main(void)
     printf("976p timers: %.4f fps, rolling shutter over 972 lines %.1f ms\n", fps,
            972 * (BOLEX_3X3_TIMER_A + 1.0) / 32e6 * 1000);
     CHECK(BOLEX_PLAY_FPS == 18, "Bolex projection speed %d", BOLEX_PLAY_FPS);
-    CHECK(BOLEX_ANGLE == 360, "Bolex shutter angle %d", BOLEX_ANGLE);
-    CHECK(want == 32000, "360 degrees at 32 fps must be 1/32 s, got 1/%d.%03d", want / 1000, want % 1000);
+    CHECK(BOLEX_ANGLE == 133, "Bolex shutter angle %d", BOLEX_ANGLE);
+    CHECK(want > 86000 && want < 87000, "133 degrees at 32 fps must be ~1/86.6 s, got 1/%d.%03d", want / 1000, want % 1000);
 
     /* Up / Down arrows: ISO 100 / 200 / 400, no wrap-around */
     CHECK(bolex_isos[0] == ISO_100 && bolex_isos[1] == ISO_200 && bolex_isos[2] == ISO_400, "ISO list");
     CHECK(bolex_iso_step(0, 1) == 1 && bolex_iso_step(1, 1) == 2 && bolex_iso_step(2, 1) == 2, "ISO up");
     CHECK(bolex_iso_step(2, -1) == 1 && bolex_iso_step(0, -1) == 0, "ISO down");
 
-    /* rear dial: Canon's 1/3 stops from 1/30 to 1/4000, both ways */
+    /* the one shutter: Canon raw 108 at 31.999 fps, through crop_rec's mapping, is ~133 degrees
+     * (a Bolex H16 Reflex), and no other Canon 1/8-EV code is nearer */
     {
-        static const int thirds[] = {96, 99, 101, 104, 107, 109, 112};   /* 1/30 1/40 1/50 1/60 1/80 1/100 1/125 */
-        for (int i = 0; i + 1 < (int)(sizeof thirds / sizeof thirds[0]); i++)
+        int fps = 31999, best = 0, best_err = 1000;
+        for (int raw = 96; raw <= 152; raw++)
         {
-            CHECK(bolex_next_third(thirds[i], 1) == thirds[i + 1], "%d +1 -> %d", thirds[i], bolex_next_third(thirds[i], 1));
-            CHECK(bolex_next_third(thirds[i + 1], -1) == thirds[i], "%d -1 -> %d", thirds[i + 1], bolex_next_third(thirds[i + 1], -1));
+            int us = (int)(1e6 * pow(2.0, (56 - raw) / 8.0));
+            int angle = (int)((long long) bolex_exposure_us(us, fps) * fps * 360 / 1000000000LL);
+            int err = abs(angle - 133);
+            if (err < best_err) { best_err = err; best = raw; }
         }
-        int r = BOLEX_RAW_1_30, n = 0;
-        while (r < BOLEX_RAW_1_4000) { r = bolex_next_third(r, 1); n++; }
-        CHECK(r == BOLEX_RAW_1_4000 && n == 21, "1/30 -> 1/4000 in %d clicks, ends at %d", n, r);
+        int us = (int)(1e6 * pow(2.0, (56 - BOLEX_RAW_SHUTTER) / 8.0));
+        int angle = (int)((long long) bolex_exposure_us(us, fps) * fps * 360 / 1000000000LL);
+        printf("shutter raw %d: 1/%d s, %d degrees (nearest to 133: raw %d)\n", BOLEX_RAW_SHUTTER,
+               1000000 / bolex_exposure_us(us, fps), angle, best);
+        CHECK(BOLEX_RAW_SHUTTER == best, "raw %d is not the nearest to 133 degrees (%d is)", BOLEX_RAW_SHUTTER, best);
+        CHECK(angle >= 128 && angle <= 138, "angle %d", angle);
     }
 
     /* the real exposure at 23.976 fps: Canon 1/30 is the whole frame (360 degrees), faster
