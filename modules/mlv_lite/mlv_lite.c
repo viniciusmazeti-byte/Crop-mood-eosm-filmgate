@@ -5272,6 +5272,19 @@ void mlv_lite_info_framing_reset(void)
     slim_info_framing_active = 0;
 }
 
+static int preview_frames_drawn = 0;     /* Framing frames drawn, for the Bolex check line */
+
+int mlv_lite_preview_frames(void)
+{
+    return preview_frames_drawn;
+}
+
+static int raw_rec_should_preview(void);
+int mlv_lite_preview_wanted(void)
+{
+    return raw_rec_should_preview();
+}
+
 static int raw_rec_should_preview(void)
 {
     if (!raw_video_enabled) return 0;
@@ -5287,8 +5300,14 @@ static int raw_rec_should_preview(void)
     /* EOS M Settings → INFO Button = Framing: toggle ML framing vs real-time LV.
      * Framing is entry 5 in crop_rec's INFO list (OFF, Histogram, Waveform, Zebras,
      * False Color, Framing, Quick Panel) - keep this number in step with crop_rec.c. */
-    if (cam_eos_m && (INFO_button == 5 || bolex_format()))
-        return slim_info_framing_active;     /* Bolex: INFO switches it; real-time at power on */
+    /* Bolex: always the Framing preview (exactly the recorded window); x10 above stays
+     * Canon's, for focusing.  (An INFO toggle between the two changed nothing on the screen
+     * of the camera - test 2026-10-29; the check line on screen says why.) */
+    if (bolex_format())
+        return 1;
+
+    if (cam_eos_m && INFO_button == 5)
+        return slim_info_framing_active;
 
     /* framing is incorrect in modes with high resolutions
      * (e.g. x5 zoom, crop_rec) */
@@ -5422,6 +5441,7 @@ unsigned int raw_rec_update_preview(unsigned int ctx)
 
 
     give_semaphore(settings_sem);
+    preview_frames_drawn++;
 
     /* be gentle with the CPU, save it for recording (especially if the buffer is almost full) */
     msleep(

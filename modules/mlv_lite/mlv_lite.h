@@ -7,4 +7,7 @@ extern WEAK_FUNC(ret_0) int mlv_raw_rec_busy();
 extern WEAK_FUNC(ret_0) void mlv_lite_info_framing_toggle(void);
 /* INFO button "Kill Global Draw": toggles the setting, returns the new state (0/1). */
 extern WEAK_FUNC(ret_0) void mlv_lite_info_framing_reset(void);
+/* Bolex check line: 1 if the Framing preview should be on; frames it has drawn so far */
+extern WEAK_FUNC(ret_0) int mlv_lite_preview_wanted(void);
+extern WEAK_FUNC(ret_0) int mlv_lite_preview_frames(void);
 extern WEAK_FUNC(ret_0) void mlv_lite_set_small_hacks_more(void);
