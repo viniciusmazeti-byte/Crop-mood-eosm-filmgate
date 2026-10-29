@@ -6892,6 +6892,8 @@ static int bolex_fmt = 0;               /* BOLEX_4_3 once crop_rec_init has run 
 extern int bolex_info_unpress_seen;
 /* src/fps-engio.c (Bolex core): turn the FPS override on at this rate ("Low light"), or off */
 extern void fps_override_force(int enable, int fps_x1000);
+/* src/fps-engio.c (Bolex core): 1 = the FPS override leaves the exposure to crop_rec */
+extern int fps_override_blanking_off;
 
 /* used by mlv_lite (resolution, bit depth) and the core: BOLEX_4_3, or 0 */
 int bolex_format()
@@ -6920,6 +6922,12 @@ static void bolex_fixed_settings(void)
         /* no crop_rec preset: Canon's own x1 reading */
         crop_preset_index = 0;
     }
+
+    /* Exposure in the tests: crop_rec alone turns Canon's shutter into the real exposure, and
+     * with the full shutter range Canon's slowest (1/30) is the whole frame (360 degrees).
+     * The FPS override must not scale it again (it did: 1/771 and a black screen). */
+    fps_override_blanking_off = BOLEX_TEST;
+    shutter_range = 1;
 
     /* 10-bit: crop_rec's analog gain in the tests, mlv_lite's digital gain in Canon's x1 mode */
     if (bit_depth_analog != 3)
@@ -7050,6 +7058,19 @@ static void bolex_step(void)
         return;
     }
 
+    /* Tests: Canon's slowest shutter is 360 degrees there (full shutter range, see
+     * bolex_fixed_settings); the measured value below does not see crop_rec's exposure. */
+    if (BOLEX_TEST)
+    {
+        int raw30 = shutterf_to_raw(1.0f / 30);
+        if (lens_info.raw_shutter != raw30)
+        {
+            shutter_lock_accept(raw30);
+            lens_set_rawshutter(raw30);
+        }
+        return;
+    }
+
     /* 360 degrees.  Measured, not computed: what Canon's shutter value means depends on the
      * mode (crop_rec timers, FPS override), so read what the sensor really uses and step the
      * shutter until it matches.  The EOS M shutter lock (movtweaks.c) holds it afterwards. */
@@ -7087,10 +7108,12 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     }
 
     int fps = fps_get_current_x1000();
-    int sh = get_current_shutter_reciprocal_x1000();
-    snprintf(buffer, 64, "4:3 %s  %d.%03d FPS  1/%d  ISO %d  10-BIT%s",
+    /* tests: the measured shutter does not see crop_rec's exposure; it is the whole frame */
+    int sh = BOLEX_TEST ? fps : get_current_shutter_reciprocal_x1000();
+    snprintf(buffer, 64, "4:3 %s  %d.%03d FPS  %s1/%d  ISO %d  10-BIT%s",
         bolex_readings[bolex_test].name,
         fps / 1000, fps % 1000,
+        BOLEX_TEST ? "~" : "",
         (sh + 500) / 1000,
         lens_info.iso,
         bolex_info_unpress_seen ? "  INFO+" : "");

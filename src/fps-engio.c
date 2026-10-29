@@ -314,10 +314,22 @@ static uint32_t nrzi_encode( uint32_t in_val )
 
 /* Low Light mode: scale shutter speed with FPS (keep shutter angle constant) */
 /* All other modes: keep shutter speed constant */
+#ifdef CONFIG_BOLEX
+/* Bolex reading tests (crop_rec preset + FPS override): crop_rec already turns Canon's shutter
+ * into the sensor's exposure at the real frame rate (adjust_shutter_blanking).  Doing it here
+ * as well scaled it twice (camera test: 1/771 and a black screen), so crop_rec turns this off. */
+int fps_override_blanking_off = 0;
+#endif
+
 void fps_override_shutter_blanking()
 {
     if (!get_fps_override())
         return;
+
+#ifdef CONFIG_BOLEX
+    if (fps_override_blanking_off)
+        return;
+#endif
 
     /* already overriden? */
     if (FRAME_SHUTTER_BLANKING_READ != *FRAME_SHUTTER_BLANKING_WRITE)
