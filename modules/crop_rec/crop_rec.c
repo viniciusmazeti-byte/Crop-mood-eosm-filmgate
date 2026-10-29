@@ -122,7 +122,7 @@ static int a35_short_readout = 0;   /* 48 fps on A35 16:9 / 1.85: 1736x958 reado
  *   rows   lines read (RAW_V = rows + 28, as 0x2D2 = 694 + 28)
  *   skip   1 line read of every 'skip' (ADTG 0x800C = skip - 1; Canon's own 720p uses 5)
  *   cmos7  CMOS[7]: 0x806 = the 694p band centred on the sensor, 0x800 = from the top
- *   fps18  1 = slowed to 18 fps; 0 = the readout's own speed (screen checks)
+ *   fps18  1 = slowed to 18 fps (FPS override, after the mode is built); 0 = its own speed
  *   ar     crop_rec High FPS aspect: 4 = the 694p readout (the tests change it), 3 = 738p
  *          (untouched; its comment says its preview works when idle) */
 struct bolex_reading { const char * name; int rows; int skip; int cmos7; int fps18; int ar; };
@@ -2595,17 +2595,14 @@ static inline uint32_t reg_override_3X3(uint32_t reg, uint32_t old_val)
             YUV_LV_S_V    = 0x1E002B;   // default x5 mode value
             YUV_LV_Buf    = 0x1DF05A0;  // default x5 mode value
 
-            /* Bolex tests: 18 fps with this readout's line time
-             * (32 MHz / (0x208 * 0xD5B) = 17.999 fps), and its number of lines */
+            /* Bolex tests: the number of lines.  The timers stay this readout's own (60 fps):
+             * a slow Timer B set here, when Canon builds the mode, leaves the screen black
+             * (camera test, T1).  18 fps comes from the FPS override afterwards instead
+             * (bolex_step), the way crop mood + FPS override has always been used. */
             if (BOLEX_TEST && is_EOSM)
             {
                 RAW_V         = bolex_readings[bolex_test].rows + 28 + reg_height;
                 Preview_V     = bolex_readings[bolex_test].rows;
-                if (bolex_readings[bolex_test].fps18)
-                {
-                    TimerA    = 0x207;
-                    TimerB    = 0xD5A;
-                }
             }
         }
     }
@@ -7015,9 +7012,10 @@ static void bolex_step(void)
     bolex_info_act();
     bolex_fixed_settings();
 
-    /* normal: the plain x1 view at 18 fps (FPS override); tests: crop_rec's timers.
+    /* 18 fps from the FPS override ("Low light": the line time stays the reading's own),
+     * in the normal x1 view and in the tests (not in the T0 screen checks).
      * x10 stays allowed, for focusing. */
-    fps_override_force(!BOLEX_TEST, BOLEX_FPS_X1000);
+    fps_override_force(bolex_readings[bolex_test].fps18, BOLEX_FPS_X1000);
     if (!BOLEX_TEST && lv_dispsize == 5)
     {
         static int last_zoom = 0;
