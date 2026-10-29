@@ -66,14 +66,22 @@ int main(void)
     check_43("4:3 3x5", (727 - 28 - 3) & ~1, 4);
 
     /* reading tests: each one changes the proven 694p readout (1736x694, 1 line of 3) */
-    CHECK(BOLEX_READINGS == 6, "%d readings", BOLEX_READINGS);
-    CHECK(bolex_readings[0].rows == 0, "reading 0 is the normal one (no preset)");
-    CHECK(bolex_readings[1].rows == 694 && bolex_readings[1].skip == 3 && bolex_readings[1].cmos7 == 0x806,
-          "T1 must be the unchanged 694p readout");
+    CHECK(BOLEX_READINGS == 8, "%d readings", BOLEX_READINGS);
+    CHECK(bolex_readings[0].rows == 0 && bolex_readings[0].fps18, "reading 0 is the normal one (no preset)");
+    CHECK(bolex_readings[1].rows == 694 && bolex_readings[1].skip == 3 && bolex_readings[1].cmos7 == 0x806 &&
+          !bolex_readings[1].fps18, "T0 must be the untouched 694p readout");
+    CHECK(bolex_readings[2].rows == 738 && bolex_readings[2].skip == 3 && bolex_readings[2].ar == 3 &&
+          !bolex_readings[2].fps18, "T0B must be the untouched 738p readout");
+    CHECK(bolex_readings[3].rows == 694 && bolex_readings[3].skip == 3 && bolex_readings[3].cmos7 == 0x806 &&
+          bolex_readings[3].fps18, "T1 must be the 694p readout at 18 fps");
+    for (int i = 3; i < BOLEX_READINGS; i++)
+        CHECK(bolex_readings[i].ar == 4, "%s must use the 694p readout", bolex_readings[i].name);
+    for (int i = 3; i < BOLEX_READINGS; i++)
+        CHECK(bolex_readings[i].fps18, "%s must run at 18 fps", bolex_readings[i].name);
     for (int i = 1; i < BOLEX_READINGS; i++)
     {
         const struct bolex_reading * r = &bolex_readings[i];
-        CHECK(r->rows > 0 && r->rows <= 694 && (r->rows & 1) == 0, "%s: %d lines", r->name, r->rows);
+        CHECK(r->rows > 0 && r->rows <= 738 && (r->rows & 1) == 0, "%s: %d lines", r->name, r->rows);
         CHECK(r->skip >= 3 && r->skip <= 16, "%s: skip %d", r->name, r->skip);
         CHECK(r->cmos7 == 0x800 || r->cmos7 == 0x806, "%s: CMOS[7] %x", r->name, r->cmos7);
         /* readings that cover the sensor from the top, within its 3480 lines: a true 4:3 frame */
@@ -85,7 +93,7 @@ int main(void)
         }
     }
     /* T4 / T5 read fewer lines than Canon's x1 (696): that is the point */
-    CHECK(bolex_readings[4].rows < 696 * 3 / 4 && bolex_readings[5].rows < 696 / 2, "fewer lines than 3x5");
+    CHECK(bolex_readings[6].rows < 696 * 3 / 4 && bolex_readings[7].rows < 696 / 2, "fewer lines than 3x5");
 
     printf("bolex_tests: %d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;

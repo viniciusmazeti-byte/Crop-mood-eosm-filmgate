@@ -121,15 +121,20 @@ static int a35_short_readout = 0;   /* 48 fps on A35 16:9 / 1.85: 1736x958 reado
  * thing at a time, so a hang tells which change caused it.
  *   rows   lines read (RAW_V = rows + 28, as 0x2D2 = 694 + 28)
  *   skip   1 line read of every 'skip' (ADTG 0x800C = skip - 1; Canon's own 720p uses 5)
- *   cmos7  CMOS[7]: 0x806 = the 694p band centred on the sensor, 0x800 = from the top */
-struct bolex_reading { const char * name; int rows; int skip; int cmos7; };
+ *   cmos7  CMOS[7]: 0x806 = the 694p band centred on the sensor, 0x800 = from the top
+ *   fps18  1 = slowed to 18 fps; 0 = the readout's own speed (screen checks)
+ *   ar     crop_rec High FPS aspect: 4 = the 694p readout (the tests change it), 3 = 738p
+ *          (untouched; its comment says its preview works when idle) */
+struct bolex_reading { const char * name; int rows; int skip; int cmos7; int fps18; int ar; };
 static const struct bolex_reading bolex_readings[] = {
-    { "3x5",          0,  5, 0     },   /* 0: the normal one, Canon's x1 view, no preset */
-    { "T1 3x3 694", 694,  3, 0x806 },   /* control: the proven readout, only slowed to 18 fps */
-    { "T2 3x5 694", 694,  5, 0x800 },   /* Canon's 1-of-5 inside crop_rec: full height */
-    { "T3 3x7 694", 694,  7, 0x800 },   /* 1-of-7, lines read unchanged (past the bottom) */
-    { "T4 3x7 496", 496,  7, 0x800 },   /* 1-of-7, full height in fewer lines: less jello */
-    { "T5 3x10 346",346, 10, 0x800 },   /* 1-of-10, full height in fewer lines still */
+    { "3x5",           0,  5, 0,     1, 0 },   /* 0: the normal one, Canon's x1 view, no preset */
+    { "T0 694 60FPS", 694,  3, 0x806, 0, 4 },   /* the proven readout, untouched (screen check) */
+    { "T0B 738 57FPS",738,  3, 0x806, 0, 3 },   /* another proven readout, untouched (screen check) */
+    { "T1 3x3 694",  694,  3, 0x806, 1, 4 },   /* control: the 694p readout, only slowed to 18 fps */
+    { "T2 3x5 694",  694,  5, 0x800, 1, 4 },   /* Canon's 1-of-5 inside crop_rec: full height */
+    { "T3 3x7 694",  694,  7, 0x800, 1, 4 },   /* 1-of-7, lines read unchanged (past the bottom) */
+    { "T4 3x7 496",  496,  7, 0x800, 1, 4 },   /* 1-of-7, full height in fewer lines: less jello */
+    { "T5 3x10 346", 346, 10, 0x800, 1, 4 },   /* 1-of-10, full height in fewer lines still */
 };
 #define BOLEX_READINGS ((int)(sizeof(bolex_readings) / sizeof(bolex_readings[0])))
 static int bolex_test = 0;      /* reading in use: 0 = normal; never saved, every boot is 0 */
@@ -2595,9 +2600,12 @@ static inline uint32_t reg_override_3X3(uint32_t reg, uint32_t old_val)
             if (BOLEX_TEST && is_EOSM)
             {
                 RAW_V         = bolex_readings[bolex_test].rows + 28 + reg_height;
-                TimerA        = 0x207;
-                TimerB        = 0xD5A;
                 Preview_V     = bolex_readings[bolex_test].rows;
+                if (bolex_readings[bolex_test].fps18)
+                {
+                    TimerA    = 0x207;
+                    TimerB    = 0xD5A;
+                }
             }
         }
     }
@@ -6905,7 +6913,7 @@ static void bolex_fixed_settings(void)
         /* the 3x3 preset, 694p High FPS readout (changed by the test, see bolex_readings) */
         crop_preset_index = 3;
         crop_preset_3x3_res_menu = 0;   /* High FPS */
-        crop_preset_ar_menu = 4;        /* with fps_reduce 0: the 1736x694 "2.50:1" readout */
+        crop_preset_ar_menu = bolex_readings[bolex_test].ar;    /* 4 + fps_reduce 0: 1736x694 */
         crop_preset_fps_reduce = 0;
         crop_preset_fps_menu = 0;       /* timers come from the test */
         slim_mode_ui = 2;
