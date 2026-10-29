@@ -464,6 +464,46 @@ static void bolex_tail_add(int chunk, uint32_t offset, uint32_t size)
     bolex_tail_n++;
 }
 
+/* Bolex: turn the last n frames of the take (bolex_tail) into NULL blocks in the closed file
+ * name.  Reopened read/write; each 512-byte sector holding a frame's block header is read, the
+ * header is checked ("VIDF") and replaced, and the sector written back in place.  Returns how
+ * many frames were changed.  (First try, writing the 16-byte headers through the recording's
+ * own file handle before closing it, left the clips whole - camera test.) */
+static int bolex_trim_file(const char * name, int n)
+{
+    FILE * g = FIO_OpenFile(name, O_RDWR | O_SYNC);
+    if (!g)
+        return 0;
+    uint8_t * buf = fio_malloc(1024);
+    if (!buf)
+    {
+        FIO_CloseFile(g);
+        return 0;
+    }
+    int done = 0;
+    for (int k = 1; k <= n; k++)
+    {
+        int i = (bolex_tail_n - k) % BOLEX_TAIL;
+        uint32_t off = bolex_tail[i].offset;
+        uint32_t sector = off & ~511;
+        int in = off - sector;
+        FIO_SeekSkipFile(g, sector, SEEK_SET);
+        int got = FIO_ReadFile(g, buf, 1024);
+        if (got < in + (int) sizeof(mlv_hdr_t))
+            continue;
+        mlv_hdr_t * h = (mlv_hdr_t *)(buf + in);
+        if (memcmp(h->blockType, "VIDF", 4) != 0)
+            continue;
+        memcpy(h->blockType, "NULL", 4);
+        FIO_SeekSkipFile(g, sector, SEEK_SET);
+        if (FIO_WriteFile(g, buf, got) == got)
+            done++;
+    }
+    fio_free(buf);
+    FIO_CloseFile(g);
+    return done;
+}
+
 /* Bolex info line (crop_rec.c): milliseconds left before REC starts, 0 = no countdown */
 static void raw_start_stop();   /* below */
 
@@ -4761,15 +4801,19 @@ cleanup:
         gui_uilock(UILOCK_EVERYTHING);
     }
 #endif
-    /* Bolex: drop the last BOLEX_TRIM_S seconds (see bolex_tail_add) */
+    /* Bolex: drop the last BOLEX_TRIM_S seconds (see bolex_tail_add).  The header written by
+     * finish_chunk gets the lower frame count; the blocks themselves are changed once the
+     * file is closed (bolex_trim_file).  A take that short is deleted. */
     int bolex_drop_take = 0;
+    int bolex_trim_n = 0;
     if (bolex_format() && thread == 0 && f && written_total[thread])
     {
         int fps_now = fps_get_current_x1000();
-        int trim = (BOLEX_TRIM_S * fps_now + 500) / 1000;
-        trim = MIN(trim, BOLEX_TAIL);
+        if (fps_now <= 0)
+            fps_now = 32000;
+        int trim = MIN((BOLEX_TRIM_S * fps_now + 500) / 1000, BOLEX_TAIL);
         if (bolex_tail_n <= trim)
-            bolex_drop_take = 1;    /* nothing left: the whole take goes */
+            bolex_drop_take = 1;
         else
         {
             for (int k = 1; k <= trim; k++)
@@ -4777,23 +4821,29 @@ cleanup:
                 int i = (bolex_tail_n - k) % BOLEX_TAIL;
                 if (bolex_tail[i].chunk != mlv_chunk)
                     break;          /* in an earlier, closed chunk (4 GB split): leave it */
-                mlv_hdr_t nul_hdr;
-                mlv_set_type(&nul_hdr, "NULL");
-                nul_hdr.blockSize = bolex_tail[i].size;
-                nul_hdr.timestamp = 0;
-                FIO_SeekSkipFile(f, bolex_tail[i].offset, SEEK_SET);
-                if (FIO_WriteFile(f, &nul_hdr, sizeof(nul_hdr)) == (int) sizeof(nul_hdr))
-                    chunk_frame_count[thread]--;
+                bolex_trim_n++;
             }
+            chunk_frame_count[thread] -= bolex_trim_n;
         }
     }
 
     if (f) finish_chunk(f, thread);
 
+    if (bolex_trim_n)
+    {
+        char * name = mlv_chunk ? chunk_filename[thread] : raw_movie_filename;
+        int done = bolex_trim_file(name, bolex_trim_n);
+        if (done == bolex_trim_n)
+            NotifyBox(2000, "Fim cortado: -%d.%d s", done * 10000 / MAX(fps, 1) / 10, done * 10000 / MAX(fps, 1) % 10);
+        else
+            NotifyBox(4000, "Corte do fim falhou (%d de %d)", done, bolex_trim_n);
+    }
+
     if (bolex_drop_take && named_clip)
     {
         FIO_RemoveFile(raw_movie_filename);
         raw_movie_filename[0] = 0;
+        NotifyBox(2000, "Plano curto: apagado");
     }
 
     if (!written_total[thread])

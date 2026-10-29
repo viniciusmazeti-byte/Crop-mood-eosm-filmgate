@@ -6964,9 +6964,27 @@ static int bolex_canon_mode_ok(void)
     return video_mode_resolution == 0 && video_mode_fps <= 30;
 }
 
-/* INFO: does nothing */
+/* White balance written in the file (MLV WBAL block; MLV App opens with it): daylight, or the
+ * "blue filter" - a cold white balance, so a daylight scene comes out deep blue.  The RAW data
+ * itself is the same either way (it is the sensor's); only the white balance changes. */
+#define BOLEX_WB_NORMAL     5500    /* as in the user's crop mood setup */
+#define BOLEX_WB_BLUE       2800
+static int bolex_blue = 0;
+
+/* INFO twice (within half a second): the blue filter on / off */
 static void bolex_info_pressed(void)
 {
+    static int last = 0;
+    int now = get_ms_clock();
+    if (last && now - last < 500)
+    {
+        last = 0;
+        bolex_blue = !bolex_blue;
+        lens_set_kelvin(bolex_blue ? BOLEX_WB_BLUE : BOLEX_WB_NORMAL);
+        NotifyBox(1500, bolex_blue ? "Filtro azul" : "Sem filtro");
+        return;
+    }
+    last = now;
 }
 
 /* Live View, not recording, no menu: keep the video mode, 32 fps, ISO 100 and 360 degrees */
@@ -7035,6 +7053,11 @@ static void bolex_step(void)
 
     if (lens_info.raw_iso != bolex_isos[iso_index])
         lens_set_rawiso(bolex_isos[iso_index]);
+
+    /* white balance: daylight, or the blue filter (INFO twice) */
+    int kelvin = bolex_blue ? BOLEX_WB_BLUE : BOLEX_WB_NORMAL;
+    if (lens_info.wb_mode != WB_KELVIN || (int) lens_info.kelvin != kelvin)
+        lens_set_kelvin(kelvin);
 }
 
 /* the one line at the bottom of the screen (test builds: the settings, to check them) */
@@ -7089,12 +7112,15 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
         return;
     }
 
-    snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT",
+    snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT%s",
         fps / 1000, fps % 1000,
         BOLEX_PLAY_FPS,
         exp_us > 0 ? (1000000 + exp_us / 2) / exp_us : 0,
         angle,
-        lens_info.iso);
+        lens_info.iso,
+        bolex_blue ? "  AZUL" : "");
+    if (bolex_blue)
+        item->color_fg = COLOR_CYAN;
 }
 
 static struct lvinfo_item bolex_info_items[] = {
