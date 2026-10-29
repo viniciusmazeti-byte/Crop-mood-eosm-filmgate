@@ -675,6 +675,10 @@ int bolex_build = 1;
  * read here and crop_rec (bolex_step) sets the shutter, 1/3 stop per click. */
 int bolex_shutter_clicks = 0;
 
+/* ISO steps of the Up / Down arrows, not yet applied (+ = higher): crop_rec (bolex_step)
+ * steps through ISO 100 / 200 / 400 */
+int bolex_iso_clicks = 0;
+
 /* Movie Live View: the touchscreen does nothing (no Quick Panel, editors or touch AF) */
 static int handle_bolex_keys(struct event * event)
 {
@@ -694,6 +698,17 @@ static int handle_bolex_keys(struct event * event)
             if (RECORDING)
                 return 0;
             bolex_shutter_clicks += (event->param == BGMT_WHEEL_RIGHT) ? 1 : -1;
+            return 0;
+
+        /* Up / Down arrows: ISO 100 / 200 / 400 (not while recording).  Swallowed, also the
+         * releases: in Canon's x5 view the arrows would move the magnified window. */
+        case BGMT_PRESS_UP:
+        case BGMT_PRESS_DOWN:
+            if (!RECORDING)
+                bolex_iso_clicks += (event->param == BGMT_PRESS_UP) ? 1 : -1;
+            return 0;
+        case BGMT_UNPRESS_UP:
+        case BGMT_UNPRESS_DOWN:
             return 0;
 
         case BGMT_TOUCH_1_FINGER:

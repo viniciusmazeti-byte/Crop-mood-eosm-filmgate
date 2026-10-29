@@ -2490,7 +2490,8 @@ static void bolex_raw_settings(void)
     output_format = OUTPUT_14BIT_LOSSLESS;
 
     /* performance: the user's crop mood setup (photos of its menus; no ML menu here) */
-    kill_gd = 1;            /* no ML drawing while recording */
+    kill_gd = 0;            /* ON froze the screen while recording (camera test): the Framing
+                             * preview is ML drawing, and Canon's own view of 976p is frozen */
     small_hacks = 2;        /* More: Canon GUI slowed, AE/AWB task suspended while recording */
     use_srm_memory = 1;     /* more frame buffers */
     preview_mode = 2;       /* Framing, as in the user's crop mood setup on this 976p readout */

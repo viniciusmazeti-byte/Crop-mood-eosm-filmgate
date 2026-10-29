@@ -6876,6 +6876,21 @@ extern int bolex_info_unpress_seen;
 extern void fps_override_force(int enable, int fps_x1000);
 /* src/gui-common.c (Bolex core): rear dial clicks not yet applied, + = faster shutter */
 extern int bolex_shutter_clicks;
+/* src/gui-common.c (Bolex core): Up / Down arrow steps not yet applied, + = higher ISO */
+extern int bolex_iso_clicks;
+/* src/histogram.c: the ML histogram (on, Luma (YUV), linear - as in the user's crop mood) */
+extern int hist_draw;
+extern int hist_type;
+extern int hist_log;
+
+/* ISO choices on the Up / Down arrows */
+static const int bolex_isos[] = { ISO_100, ISO_200, ISO_400 };
+
+/* the ISO choice one step up (+1) or down (-1), kept within bolex_isos[] */
+static int bolex_iso_step(int index, int sign)
+{
+    return COERCE(index + sign, 0, (int)COUNT(bolex_isos) - 1);
+}
 
 /* Canon raw shutter codes (1/8 EV): 1/30 (crop_rec's whole frame: 360 degrees) .. 1/4000 */
 #define BOLEX_RAW_1_30      96
@@ -6944,6 +6959,11 @@ static void bolex_fixed_settings(void)
         raw_invalidate_lv_calibration();
     }
 
+    /* the histogram: on, Luma (YUV), linear */
+    hist_draw = 1;
+    hist_type = 0;
+    hist_log = 0;
+
     /* buttons: nothing remapped, INFO belongs to the Bolex */
     INFO_button = 0;
     Arrows_U_D = 0;
@@ -7007,23 +7027,30 @@ static void bolex_step(void)
         }
     }
 
+    /* ISO: 100 at start, then the Up / Down arrows (gui-common.c): 100 / 200 / 400 */
+    static int iso_index = 0;
+    while (bolex_iso_clicks)
+    {
+        int sign = bolex_iso_clicks > 0 ? 1 : -1;
+        iso_index = bolex_iso_step(iso_index, sign);
+        bolex_iso_clicks -= sign;
+    }
+
     /* x10 is for focusing only: ISO is set and checked in the normal view */
     if (lv_dispsize == 10)
         return;
 
+    /* hold it (also catches Auto ISO, raw_iso 0): at once after an arrow, else once a second */
     static int last_expo = 0;
+    static int last_index = -1;
     int now = get_ms_clock();
-    if (now - last_expo < 1000)
+    if (iso_index == last_index && now - last_expo < 1000)
         return;
     last_expo = now;
+    last_index = iso_index;
 
-    /* ISO 100 (also catches Auto ISO, raw_iso 0) */
-    if (lens_info.raw_iso != ISO_100)
-    {
-        lens_set_rawiso(ISO_100);
-        return;
-    }
-
+    if (lens_info.raw_iso != bolex_isos[iso_index])
+        lens_set_rawiso(bolex_isos[iso_index]);
 }
 
 /* the one line at the bottom of the screen (test builds: the settings, to check them) */

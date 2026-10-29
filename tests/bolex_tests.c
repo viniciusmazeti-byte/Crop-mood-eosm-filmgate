@@ -6,6 +6,10 @@
 static int failures = 0, checks = 0;
 #define CHECK(cond, ...) do { checks++; if (!(cond)) { failures++; printf("FAIL: " __VA_ARGS__); printf("\n"); } } while (0)
 
+#define ISO_100 72
+#define ISO_200 80
+#define ISO_400 88
+#define COUNT(a) (sizeof(a) / sizeof((a)[0]))
 #define COERCE(x,lo,hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))
 #include "bolex_snippets.h"   /* the real code, copied out of crop_rec.c by tests/run.sh */
 
@@ -45,6 +49,11 @@ int main(void)
     CHECK(BOLEX_PLAY_FPS == 18, "Bolex projection speed %d", BOLEX_PLAY_FPS);
     CHECK(BOLEX_ANGLE == 360, "Bolex shutter angle %d", BOLEX_ANGLE);
     CHECK(want == 32000, "360 degrees at 32 fps must be 1/32 s, got 1/%d.%03d", want / 1000, want % 1000);
+
+    /* Up / Down arrows: ISO 100 / 200 / 400, no wrap-around */
+    CHECK(bolex_isos[0] == ISO_100 && bolex_isos[1] == ISO_200 && bolex_isos[2] == ISO_400, "ISO list");
+    CHECK(bolex_iso_step(0, 1) == 1 && bolex_iso_step(1, 1) == 2 && bolex_iso_step(2, 1) == 2, "ISO up");
+    CHECK(bolex_iso_step(2, -1) == 1 && bolex_iso_step(0, -1) == 0, "ISO down");
 
     /* rear dial: Canon's 1/3 stops from 1/30 to 1/4000, both ways */
     {
