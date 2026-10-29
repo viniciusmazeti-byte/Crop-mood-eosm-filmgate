@@ -6830,22 +6830,25 @@ static void slim_cover_hold_and_release(int hold_ms)
  * This build turns the EOS M into a Bolex: one format, everything fixed, no ML menu.
  *
  *   4:3  crop_rec presets OFF: Canon's own x1 movie Live View, which reads the sensor 3x5
- *        (3 columns binned, 1 line of 5).  18 fps from the ML FPS override in "Low light"
- *        mode (Canon's timer A, hence its line time, is kept).
+ *        (3 columns binned, 1 line of 5).
  *
- * Fixed: 18 fps, 10-bit lossless, ISO 100, 360 degree shutter (1/18 s), no sound.
+ * Like a Bolex run at 32 fps and projected at 18: the camera films at 32 fps (ML FPS override
+ * in "Low light" mode, Canon's timer A and line time kept), and mlv_lite labels the file
+ * 18 fps, so it plays slowed down to 56%.  The hand shake, filmed in more frames and played
+ * slower, looks smoother than at 18.
  *
- * Tripod mode (mlv_lite.c, "Bolex stabilizer"): the recorded window is a little smaller than
- * the sensor's and follows the scene frame by frame, measured on the Live View picture.
- * INFO x2 switches it: ON -> ON, one frame later -> OFF -> ON (testing which timing is right).
+ * Fixed, no choices: 32 fps, played at 18, 10-bit lossless, ISO 100, 360 degree shutter
+ * (1/32 s), no sound.  INFO does nothing (it is kept for the rewind).
  *
- * (Readings with fewer lines, 3x7 / 3x10, were tried: the files record, but the screen path
- * of every reading not calibrated by Canon or crop mood stays black or hangs.  Removed.)
+ * (Tried and removed: readings with fewer lines, 3x7 / 3x10 - the files record, but the screen
+ * of every reading Canon or crop mood never calibrated stays black or hangs; and an in-camera
+ * stabilizer moving the recorded window - on the camera it made the picture jolt.)
  */
 #define BOLEX_4_3           2   /* the only format; 0 = not a Bolex build */
-#define BOLEX_FPS_X1000     18000
+#define BOLEX_FPS_X1000     32000   /* camera speed; the file plays at BOLEX_PLAY_FPS */
+#define BOLEX_PLAY_FPS      18      /* projection speed written in the file */
 #define BOLEX_ANGLE         360
-#define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 360 degrees: 1/18 s, as 1/x * 1000 */
+#define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 360 degrees: 1/32 s, as 1/x * 1000 */
 
 /* src/gui-common.c (Bolex core): 1 once Canon has sent an INFO release.  The EOS M may not
  * send one at all; the rewind (hold INFO) needs to know.  Shown on screen. */
@@ -6859,13 +6862,10 @@ int bolex_format()
     return bolex_fmt;
 }
 
-/* tripod mode: 0 = off, 1 = on, 2 = on with the correction one frame later (see mlv_lite) */
-static CONFIG_INT("bolex.stab", bolex_stab_cfg, 1);
-
-/* used by mlv_lite */
-int bolex_stab_mode()
+/* used by mlv_lite: the frame rate written in the file (the camera films at BOLEX_FPS_X1000) */
+int bolex_play_fps()
 {
-    return bolex_fmt ? COERCE(bolex_stab_cfg, 0, 2) : 0;
+    return bolex_fmt ? BOLEX_PLAY_FPS : 0;
 }
 
 /* Put every setting the Bolex keeps fixed back where it belongs.  Cheap; called often. */
@@ -6895,21 +6895,9 @@ static void bolex_fixed_settings(void)
     tapdisp = 0;
 }
 
-/* INFO: a double press switches the tripod mode (ON -> ON+1 frame -> OFF -> ON) */
-static int bolex_info_last_press = 0;
-
+/* INFO: does nothing (it is kept for the rewind) */
 static void bolex_info_pressed(void)
 {
-    int now = get_ms_clock();
-    if (bolex_info_last_press && now - bolex_info_last_press < 500)
-    {
-        bolex_info_last_press = 0;
-        bolex_stab_cfg = (COERCE(bolex_stab_cfg, 0, 2) + 1) % 3;
-        static const char * names[] = { "Tripe OFF", "Tripe ON", "Tripe ON +1 quadro" };
-        NotifyBox(2000, "%s", names[bolex_stab_cfg]);
-        return;
-    }
-    bolex_info_last_press = now;
 }
 
 /* raw shutter steps (1/8 EV) that bring a shutter of 1/real to 1/want; + means faster */
@@ -6931,7 +6919,7 @@ static int bolex_shutter_steps(int real_x1000, int want_x1000)
     return steps;
 }
 
-/* Live View, not recording, no menu: keep the video mode, ISO 100 and 360 degrees */
+/* Live View, not recording, no menu: keep the video mode, 32 fps, ISO 100 and 360 degrees */
 static void bolex_step(void)
 {
     if (!bolex_fmt || !lv || !is_movie_mode() || RECORDING)
@@ -6939,7 +6927,7 @@ static void bolex_step(void)
 
     bolex_fixed_settings();
 
-    /* the plain x1 view at 18 fps (FPS override).  x10 stays allowed, for focusing. */
+    /* the plain x1 view at 32 fps (FPS override).  x10 stays allowed, for focusing. */
     fps_override_force(1, BOLEX_FPS_X1000);
     if (lv_dispsize == 5)
     {
@@ -7008,20 +6996,11 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     int fps = fps_get_current_x1000();
     int sh = get_current_shutter_reciprocal_x1000();
 
-    /* tripod mode: how far the recorded window has moved to follow the scene (raw pixels) */
-    char stab[24] = "TRIPE OFF";
-    int sx = 0, sy = 0;
-    if (bolex_stab_mode())
-    {
-        bolex_stab_offset(&sx, &sy);
-        snprintf(stab, sizeof(stab), "TRIPE%s %+d %+d", bolex_stab_mode() == 2 ? "+1" : "", sx, sy);
-    }
-
-    snprintf(buffer, 64, "4:3  %d.%03d FPS  1/%d  ISO %d  %s%s",
+    snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d  ISO %d  10-BIT%s",
         fps / 1000, fps % 1000,
+        BOLEX_PLAY_FPS,
         (sh + 500) / 1000,
         lens_info.iso,
-        stab,
         bolex_info_unpress_seen ? "  INFO+" : "");
 }
 
@@ -8466,7 +8445,6 @@ MODULE_CONFIGS_START()
     MODULE_CONFIG(Arrows_U_D)
     MODULE_CONFIG(more_hacks)
     MODULE_CONFIG(crop_settings_ver)
-    MODULE_CONFIG(bolex_stab_cfg)
 MODULE_CONFIGS_END()
 
 MODULE_CBRS_START()

@@ -25,5 +25,5 @@ extern WEAK_FUNC(ret_0) int crop_rec_video_standard();
 extern WEAK_FUNC(ret_0) int crop_rec_shutter_record();
 /* Bolex: 2 = 4:3 (Canon x1, 3x5), the only format; 0 = not a Bolex build */
 extern WEAK_FUNC(ret_0) int bolex_format();
-/* Bolex tripod mode: 0 = off, 1 = on, 2 = on with the correction one frame later */
-extern WEAK_FUNC(ret_0) int bolex_stab_mode();
+/* Bolex: the frame rate written in the file (the projection speed; the camera films faster); 0 = not a Bolex build */
+extern WEAK_FUNC(ret_0) int bolex_play_fps();
