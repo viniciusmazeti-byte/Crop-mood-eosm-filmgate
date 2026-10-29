@@ -977,12 +977,11 @@ void update_cropping_offsets()
     }
 }
 
-/* Bolex recorded width, in raw columns of 3 sensor columns each (3x3 readout; also the old
- * 3x5 x1 view, same sensor width per column).
- * Sized for a Bolex C-mount 25 mm on the EOS M: at 1536 the corners went black.  Measured on
- * a frame from the camera, the picture turns black at ~76% of the 1536-wide frame's half
- * diagonal; 1104 (72%) keeps the corners just inside it (soft vignetting, like 16 mm). */
-#define BOLEX_RES_X 1104
+/* Bolex recorded width: the whole 1620p readout (crop_rec 1x1, 2160x1620, 9.3 x 7 mm of
+ * sensor, about the 16 mm film gate), so a Bolex C-mount lens covers it.
+ * (Earlier: 1104 of the 3x5 / 3x3 readouts, 3 sensor columns each, to stay inside the 25 mm's
+ * image circle: black started at ~76% of a 1536-wide frame's half diagonal, 1104 is 72%.) */
+#define BOLEX_RES_X 2160
 
 static REQUIRES(settings_sem)
 void update_resolution_params()
@@ -1015,7 +1014,7 @@ void update_resolution_params()
     int num = aspect_ratio_presets_num[aspect_ratio_index];
     int den = aspect_ratio_presets_den[aspect_ratio_index];
 
-    /* Bolex 4:3: BOLEX_RES_X wide (centred), and as high as gives 4:3: 1104x828 on the 3x3
+    /* Bolex 4:3: BOLEX_RES_X wide (centred), and as high as gives 4:3: 2160x1620 on the 1620p
      * readout (square pixels).  On a stretched readout (3x5) the RAWC block says by how much. */
     if (bolex_format())
     {
