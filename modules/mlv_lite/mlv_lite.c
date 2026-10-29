@@ -990,6 +990,12 @@ void update_cropping_offsets()
     }
 }
 
+/* Bolex recorded width, in raw columns of Canon's x1 view (3 sensor columns each).
+ * Sized for a Bolex C-mount 25 mm on the EOS M: at 1536 the corners went black.  Measured on
+ * a frame from the camera, the picture turns black at ~76% of the 1536-wide frame's half
+ * diagonal; 1104 (72%) keeps the corners just inside it (soft vignetting, like 16 mm). */
+#define BOLEX_RES_X 1104
+
 static REQUIRES(settings_sem)
 void update_resolution_params()
 {
@@ -1021,12 +1027,12 @@ void update_resolution_params()
     int num = aspect_ratio_presets_num[aspect_ratio_index];
     int den = aspect_ratio_presets_den[aspect_ratio_index];
 
-    /* Bolex 4:3: 1536 wide, and as high as gives 4:3 once stretched vertically (the RAWC
-     * block in the file says by how much): ~692 lines in Canon's x1 view (3x5); in the
-     * reading tests 1152 (3x3), 692, 494 or 346 */
+    /* Bolex 4:3: BOLEX_RES_X wide (centred), and as high as gives 4:3 once stretched
+     * vertically (the RAWC block in the file says by how much): 498 lines in Canon's x1
+     * view (3x5), 1104x830 once stretched */
     if (bolex_format())
     {
-        res_x = MIN(1536, max_res_x);
+        res_x = MIN(BOLEX_RES_X, max_res_x);
         num = 4;
         den = 3;
     }

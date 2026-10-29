@@ -13,13 +13,13 @@ static int failures = 0, checks = 0;
 #define OUTPUT_COMPRESSION 1
 #define BPP 14
 #define MOD(a,b) ((((a) % (b)) + (b)) % (b))
-#include "bolex_mlv_snippets.h"      /* calc_res_y, copied out of mlv_lite.c */
+#include "bolex_mlv_snippets.h"      /* BOLEX_RES_X and calc_res_y, copied out of mlv_lite.c */
 
 /* the recorded size for a reading, and how 4:3 it is once stretched */
 static void check_43(const char * name, int max_res_y, int skip_y)
 {
     float squeeze = (1 + skip_y) / 3.0f;            /* lines 1 of (1+skip), columns binned 3 */
-    int w = 1536;
+    int w = BOLEX_RES_X;
     int h = calc_res_y(w, max_res_y, 4, 3, squeeze);
     float aspect = w / (h * squeeze);
     CHECK(h <= max_res_y && (h & 1) == 0, "%s: height %d (max %d)", name, h, max_res_y);
@@ -65,6 +65,15 @@ int main(void)
 
     /* 3x5: Canon x1 raw is 727 lines, 28 on top and 3 at the bottom are not picture */
     check_43("4:3 3x5", (727 - 28 - 3) & ~1, 4);
+
+    /* the width suits the raw format (8 pixels) and the lossless encoder (16) */
+    CHECK(BOLEX_RES_X % 16 == 0, "width %d is not a multiple of 16", BOLEX_RES_X);
+
+    /* Bolex 25 mm C-mount: in a 1536-wide frame from the camera, black starts at ~76% of the
+     * half diagonal (both upper corners and both sides).  The recorded 4:3 frame is centred,
+     * so its corners sit at BOLEX_RES_X / 1536 of that half diagonal: keep 2% of margin. */
+    CHECK(BOLEX_RES_X * 100 / 1536 <= 74, "corners at %d%% of the old frame: inside the black (76%%)", BOLEX_RES_X * 100 / 1536);
+    CHECK(BOLEX_RES_X * 100 / 1536 >= 68, "frame %d%% smaller than needed", BOLEX_RES_X * 100 / 1536);
 
     printf("bolex_tests: %d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;

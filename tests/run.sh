@@ -38,7 +38,10 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "#define BOLEX_SHUTTER_X1000"
   python3 tests/extract.py $CR function bolex_shutter_steps
 } > "$OUT/bolex_snippets.h"
-python3 tests/extract.py modules/mlv_lite/mlv_lite.c function calc_res_y > "$OUT/bolex_mlv_snippets.h"
+{
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_RES_X"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c function calc_res_y
+} > "$OUT/bolex_mlv_snippets.h"
 
 # 2. structure check: the film table exists once, in src/film-formats.h only
 if grep -n '"Super 8 Actual"\|"A35 Anamorphic 2x"' modules/crop_rec/crop_rec.c modules/mlv_lite/mlv_lite.c; then
