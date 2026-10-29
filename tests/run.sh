@@ -36,6 +36,10 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "#define BOLEX_PLAY_FPS"
   python3 tests/extract.py $CR line     "#define BOLEX_ANGLE"
   python3 tests/extract.py $CR line     "#define BOLEX_SHUTTER_X1000"
+  python3 tests/extract.py $CR line     "#define BOLEX_RAW_1_30"
+  python3 tests/extract.py $CR line     "#define BOLEX_RAW_1_4000"
+  python3 tests/extract.py $CR function bolex_next_third
+  python3 tests/extract.py $CR function bolex_exposure_us
 } > "$OUT/bolex_snippets.h"
 {
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_RES_X"

@@ -6869,6 +6869,38 @@ static void slim_cover_hold_and_release(int hold_ms)
 extern int bolex_info_unpress_seen;
 /* src/fps-engio.c (Bolex core): turn the FPS override on at this rate ("Low light"), or off */
 extern void fps_override_force(int enable, int fps_x1000);
+/* src/gui-common.c (Bolex core): rear dial clicks not yet applied, + = faster shutter */
+extern int bolex_shutter_clicks;
+
+/* Canon raw shutter codes (1/8 EV): 1/30 (crop_rec's whole frame: 360 degrees) .. 1/4000 */
+#define BOLEX_RAW_1_30      96
+#define BOLEX_RAW_1_4000    152
+
+/* the next Canon 1/3-stop shutter code from raw, one step faster (+1) or slower (-1);
+ * the thirds sit at 0, 3 and 5 of every 8 (96 = 1/30, 99 = 1/40, 101 = 1/50, 104 = 1/60) */
+static int bolex_next_third(int raw, int sign)
+{
+    for (int i = 0; i < 8; i++)
+    {
+        raw += sign;
+        int m = raw & 7;
+        if (m == 0 || m == 3 || m == 5)
+            break;
+    }
+    return raw;
+}
+
+/* The exposure the sensor really gets, in microseconds, for Canon's shutter (us) at fps_x1000:
+ * crop_rec's mapping with the full shutter range in a 24-30p Canon mode (adjust_shutter_blanking:
+ * Canon's 1/4000 ... 1/30 spread over nothing ... the whole frame), capped at the frame. */
+static int bolex_exposure_us(int canon_us, int fps_x1000)
+{
+    if (fps_x1000 <= 0)
+        return 0;
+    int frame_us = (int)(1000000000LL / fps_x1000);
+    int64_t us = (int64_t)(canon_us - 250) * 33613 / fps_x1000;
+    return (int) COERCE(us, 1, frame_us);
+}
 
 /* used by mlv_lite (resolution, bit depth) and the core: BOLEX_4_3, or 0 */
 int bolex_format()
@@ -6945,7 +6977,33 @@ static void bolex_step(void)
         return;
 #endif
 
-    /* x10 is for focusing only: exposure is set and checked in the normal view */
+    /* the shutter: 360 degrees (Canon 1/30) once at start, then the rear dial, 1/3 stop per
+     * click (gui-common.c), from 1/30 to 1/4000.  The EOS M shutter lock (movtweaks.c) holds it. */
+    if (bolex_canon_mode_ok() && lens_info.raw_shutter)
+    {
+        static int start_done = 0;
+        int raw = lens_info.raw_shutter;
+        if (!start_done)
+        {
+            raw = BOLEX_RAW_1_30;
+            start_done = 1;
+            bolex_shutter_clicks = 0;
+        }
+        while (bolex_shutter_clicks)
+        {
+            int sign = bolex_shutter_clicks > 0 ? 1 : -1;
+            raw = bolex_next_third(raw, sign);
+            bolex_shutter_clicks -= sign;
+        }
+        raw = COERCE(raw, BOLEX_RAW_1_30, BOLEX_RAW_1_4000);
+        if (raw != lens_info.raw_shutter)
+        {
+            shutter_lock_accept(raw);
+            lens_set_rawshutter(raw);
+        }
+    }
+
+    /* x10 is for focusing only: ISO is set and checked in the normal view */
     if (lv_dispsize == 10)
         return;
 
@@ -6962,16 +7020,6 @@ static void bolex_step(void)
         return;
     }
 
-    /* 360 degrees: Canon at 1/30, its slowest, which crop_rec makes the whole frame (full
-     * shutter range, see bolex_fixed_settings).  The EOS M shutter lock (movtweaks.c) holds it. */
-    if (!bolex_canon_mode_ok())
-        return;
-    int raw30 = shutterf_to_raw(1.0f / 30);
-    if (lens_info.raw_shutter != raw30)
-    {
-        shutter_lock_accept(raw30);
-        lens_set_rawshutter(raw30);
-    }
 }
 
 /* the one line at the bottom of the screen (test builds: the settings, to check them) */
@@ -6993,17 +7041,18 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
         return;
     }
 
-    /* the shutter is the whole frame (360 degrees); Canon's measured value does not see
-     * crop_rec's exposure, so show the frame time */
+    /* the real exposure (Canon's measured value does not see crop_rec's), and its angle */
     int fps = fps_get_current_x1000();
-    int sh = fps * 360 / BOLEX_ANGLE;
+    int canon_us = lens_info.raw_shutter ? (int)(raw2shutterf(lens_info.raw_shutter) * 1000000) : 0;
+    int exp_us = bolex_exposure_us(canon_us, fps);
+    int angle = (int)((int64_t) exp_us * fps * 360 / 1000000000LL);
 
-    snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d  ISO %d  10-BIT%s",
+    snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  10-BIT",
         fps / 1000, fps % 1000,
         BOLEX_PLAY_FPS,
-        (sh + 500) / 1000,
-        lens_info.iso,
-        bolex_info_unpress_seen ? "  INFO+" : "");
+        exp_us > 0 ? (1000000 + exp_us / 2) / exp_us : 0,
+        angle,
+        lens_info.iso);
 }
 
 static struct lvinfo_item bolex_info_items[] = {

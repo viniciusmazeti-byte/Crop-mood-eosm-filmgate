@@ -667,6 +667,14 @@ static void slim_info_lp_release(int fire_short)
 /* 1 once Canon has sent an INFO release (crop_rec shows it; the EOS M may never send one) */
 int bolex_info_unpress_seen = 0;
 
+/* modules (mlv_lite, sd_uhs) read this (weak) to keep the Bolex performance settings fixed */
+int bolex_build = 1;
+
+/* Shutter clicks of the rear dial, not yet applied (+ = faster).  The EOS M shutter lock reverts
+ * Canon's own dial changes outside the ML menu, and the Bolex has no ML menu, so the dial is
+ * read here and crop_rec (bolex_step) sets the shutter, 1/3 stop per click. */
+int bolex_shutter_clicks = 0;
+
 /* Movie Live View: the touchscreen does nothing (no Quick Panel, editors or touch AF) */
 static int handle_bolex_keys(struct event * event)
 {
@@ -680,6 +688,14 @@ static int handle_bolex_keys(struct event * event)
 
     switch (event->param)
     {
+        /* rear dial: shutter (not while recording) */
+        case BGMT_WHEEL_RIGHT:
+        case BGMT_WHEEL_LEFT:
+            if (RECORDING)
+                return 0;
+            bolex_shutter_clicks += (event->param == BGMT_WHEEL_RIGHT) ? 1 : -1;
+            return 0;
+
         case BGMT_TOUCH_1_FINGER:
         case BGMT_UNTOUCH_1_FINGER:
         case BGMT_TOUCH_2_FINGER:

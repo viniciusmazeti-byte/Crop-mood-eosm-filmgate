@@ -6,6 +6,7 @@
 static int failures = 0, checks = 0;
 #define CHECK(cond, ...) do { checks++; if (!(cond)) { failures++; printf("FAIL: " __VA_ARGS__); printf("\n"); } } while (0)
 
+#define COERCE(x,lo,hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))
 #include "bolex_snippets.h"   /* the real code, copied out of crop_rec.c by tests/run.sh */
 
 /* mlv_lite's height rule, as recorded with lossless compression */
@@ -37,6 +38,30 @@ int main(void)
     CHECK(BOLEX_PLAY_FPS == 18, "Bolex projection speed %d", BOLEX_PLAY_FPS);
     CHECK(BOLEX_ANGLE == 360, "Bolex shutter angle %d", BOLEX_ANGLE);
     CHECK(want == 24000, "360 degrees at 24 fps must be 1/24 s, got 1/%d.%03d", want / 1000, want % 1000);
+
+    /* rear dial: Canon's 1/3 stops from 1/30 to 1/4000, both ways */
+    {
+        static const int thirds[] = {96, 99, 101, 104, 107, 109, 112};   /* 1/30 1/40 1/50 1/60 1/80 1/100 1/125 */
+        for (int i = 0; i + 1 < (int)(sizeof thirds / sizeof thirds[0]); i++)
+        {
+            CHECK(bolex_next_third(thirds[i], 1) == thirds[i + 1], "%d +1 -> %d", thirds[i], bolex_next_third(thirds[i], 1));
+            CHECK(bolex_next_third(thirds[i + 1], -1) == thirds[i], "%d -1 -> %d", thirds[i + 1], bolex_next_third(thirds[i + 1], -1));
+        }
+        int r = BOLEX_RAW_1_30, n = 0;
+        while (r < BOLEX_RAW_1_4000) { r = bolex_next_third(r, 1); n++; }
+        CHECK(r == BOLEX_RAW_1_4000 && n == 21, "1/30 -> 1/4000 in %d clicks, ends at %d", n, r);
+    }
+
+    /* the real exposure at 23.976 fps: Canon 1/30 is the whole frame (360 degrees), faster
+     * Canon values shorter, 1/4000 almost nothing */
+    {
+        int fps = 23976, frame = 1000000000 / fps;
+        CHECK(bolex_exposure_us(33333, fps) == frame, "1/30 -> %d us, frame %d", bolex_exposure_us(33333, fps), frame);
+        int e50 = bolex_exposure_us(20000, fps), e100 = bolex_exposure_us(10000, fps), e4000 = bolex_exposure_us(250, fps);
+        printf("exposure at 23.976: Canon 1/50 -> 1/%d, 1/100 -> 1/%d, 1/4000 -> %d us\n", 1000000 / e50, 1000000 / e100, e4000);
+        CHECK(e50 < frame && e100 < e50 && e4000 >= 1 && e4000 < 100, "exposures %d %d %d", e50, e100, e4000);
+        CHECK(bolex_exposure_us(0, 0) == 0, "no fps");
+    }
 
     /* 1620p 1x1 readout: 1620 picture lines, square pixels, the whole readout recorded */
     check_43("4:3 1620p", 1620, 0);

@@ -35,6 +35,9 @@ static int turned_on = 0;
 CONFIG_INT("sd.sd_overclock", sd_overclock, 3);
 static CONFIG_INT("sd.sd_access_mode", access_mode, 1);
 
+/* Bolex build (src/gui-common.c, core): the overclock stays on (no ML menu) */
+extern int bolex_build;
+
 /* CID info hook, should work on all DIGIC 5 models */
 unsigned int MID;
 unsigned int OID;
@@ -669,6 +672,14 @@ static unsigned int sd_uhs_init()
         sd_read_clock       = 0xff642910;   /* sdReadBlk */
         SD_ReConfiguration  = (void *) 0xFF641314;
         
+        /* Bolex build (src/gui-common.c; no ML menu): always 240 MHz, SDR50 access, the
+         * settings dannephoto's crop mood ran long takes with on this camera */
+        if (bolex_build)
+        {
+            sd_overclock = 3;
+            access_mode = 0;
+        }
+
         if (sd_overclock)
         {
             sd_overclock_task();

@@ -110,6 +110,10 @@ extern int WEAK_FUNC(leftrighttoggle) Arrows_L_R;
 static int morehack = 0; /* coming from crop_rec.c */
 extern int WEAK_FUNC(morehack) more_hacks;
 
+/* Bolex build (src/gui-common.c, core): the performance settings below stay fixed (no ML menu) */
+extern int bolex_build;
+#define BOLEX_WARM_UP 4     /* card warm-up at start: 8 MB << 4 = 128 MB written and deleted */
+
 static int infotoggle = 0; /* coming from crop_rec.c */
 extern int WEAK_FUNC(infotoggle) INFO_button;
 
@@ -2485,6 +2489,15 @@ static void bolex_raw_settings(void)
 
     raw_video_enabled = 1;
     output_format = OUTPUT_14BIT_LOSSLESS;
+
+    /* performance, as set in dannephoto's crop mood for long takes (no ML menu here) */
+    kill_gd = 1;            /* no ML drawing while recording */
+    small_hacks = 2;        /* More: Canon GUI slowed, AE/AWB task suspended while recording */
+    use_srm_memory = 1;     /* more frame buffers */
+    preview_mode = 1;       /* Canon's real-time view (the Framing preview froze, camera test) */
+    preview_toggle = 0;
+    warm_up = BOLEX_WARM_UP;
+
     pre_record = 0;
     rec_trigger = 0;
     dolly_mode = 0;
@@ -5566,6 +5579,10 @@ static unsigned int raw_rec_init()
     }
 
     lvinfo_add_items (info_items, COUNT(info_items));
+
+    /* Bolex: the card is always warmed up at start (dannephoto's crop mood option) */
+    if (bolex_build)
+        warm_up = BOLEX_WARM_UP;
 
     /* some cards may like this */
     if (warm_up)
