@@ -253,12 +253,6 @@ static int bpp_digital_gain()
         return 14;
     }
 
-    /* Bolex (Canon's x1 mode): fixed 10-bit */
-    if (bolex_format())
-    {
-        return 10;
-    }
-
     if (output_format == OUTPUT_12BIT_LOSSLESS)
     {
         return 12;
@@ -314,13 +308,6 @@ static int default_height_720p = 0;
 
 static int raw_digital_gain_ok()
 {
-    /* Bolex 4:3 is Canon's own x1 mode (1808x727 raw with borders, one line over the
-     * default_height guess below): digital gain is fine there */
-    if (bolex_format() && !crop_rec_is_enabled() && output_format > OUTPUT_14BIT_LOSSLESS)
-    {
-        return 1;
-    }
-
     if (output_format > OUTPUT_14BIT_LOSSLESS)
     {
         /* fixme: not working in modes with higher resolution */
@@ -2498,7 +2485,7 @@ static void bolex_raw_settings(void)
         return;
 
     raw_video_enabled = 1;
-    output_format = OUTPUT_AUTO_BIT_LOSSLESS;   /* lossless; 10-bit comes from bpp_digital_gain */
+    output_format = OUTPUT_14BIT_LOSSLESS;
     pre_record = 0;
     rec_trigger = 0;
     dolly_mode = 0;
@@ -5300,8 +5287,8 @@ static int raw_rec_should_preview(void)
     /* EOS M Settings → INFO Button = Framing: toggle ML framing vs real-time LV.
      * Framing is entry 5 in crop_rec's INFO list (OFF, Histogram, Waveform, Zebras,
      * False Color, Framing, Quick Panel) - keep this number in step with crop_rec.c. */
-    if (cam_eos_m && INFO_button == 5)
-        return slim_info_framing_active;
+    if (cam_eos_m && (INFO_button == 5 || bolex_format()))
+        return slim_info_framing_active;     /* Bolex: INFO switches it; real-time at power on */
 
     /* framing is incorrect in modes with high resolutions
      * (e.g. x5 zoom, crop_rec) */

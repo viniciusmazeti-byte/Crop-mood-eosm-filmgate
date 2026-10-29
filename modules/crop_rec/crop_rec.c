@@ -6843,8 +6843,9 @@ static void slim_cover_hold_and_release(int hold_ms)
  * times and blue/pink first frames (camera test).  Until Canon is at 50/60p the override
  * stays off and the info line says what to set.
  *
- * Fixed, no choices: 32 fps, played at 18, 10-bit lossless, ISO 100, 360 degree shutter
- * (1/32 s), no sound.  INFO does nothing (it is kept for the rewind).
+ * Fixed, no choices: 32 fps, played at 18, 14-bit lossless, ISO 100, 360 degree shutter
+ * (1/32 s), no sound.  INFO switches the screen between Canon's real-time view (at power on)
+ * and mlv_lite's Framing preview (slow, but exactly the recorded window).
  *
  * (Tried and removed: readings with fewer lines, 3x7 / 3x10 - the files record, but the screen
  * of every reading Canon or crop mood never calibrated stays black or hangs; and an in-camera
@@ -6884,11 +6885,11 @@ static void bolex_fixed_settings(void)
     if (crop_preset_index != 0)
         crop_preset_index = 0;
 
-    /* 10-bit: mlv_lite does it (digital gain) in Canon's x1 mode */
-    if (bit_depth_analog != 3)
+    /* 14-bit: Canon's own depth, no analog or digital gain trick */
+    if (bit_depth_analog != 0)
     {
-        bit_depth_analog = 3;
-        slim_bit_depth_ui = 0;
+        bit_depth_analog = 0;
+        slim_bit_depth_ui = 3;
         raw_invalidate_lv_calibration();
     }
 
@@ -6907,9 +6908,10 @@ static int bolex_canon_fast_enough(void)
     return video_mode_fps * 1000 > BOLEX_FPS_X1000;
 }
 
-/* INFO: does nothing (it is kept for the rewind) */
+/* INFO: real-time view <-> Framing preview (mlv_lite; real-time at power on) */
 static void bolex_info_pressed(void)
 {
+    mlv_lite_info_framing_toggle();
 }
 
 /* raw shutter steps (1/8 EV) that bring a shutter of 1/real to 1/want; + means faster */
@@ -7017,7 +7019,7 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     int fps = fps_get_current_x1000();
     int sh = get_current_shutter_reciprocal_x1000();
 
-    snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d  ISO %d  10-BIT%s",
+    snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d  ISO %d  14-BIT%s",
         fps / 1000, fps % 1000,
         BOLEX_PLAY_FPS,
         (sh + 500) / 1000,
