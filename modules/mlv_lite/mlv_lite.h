@@ -10,3 +10,5 @@ extern WEAK_FUNC(ret_0) void mlv_lite_info_framing_reset(void);
 extern WEAK_FUNC(ret_0) void mlv_lite_set_small_hacks_more(void);
 /* Bolex info line: frames captured in the take being recorded (0 when not recording) */
 extern WEAK_FUNC(ret_0) int mlv_lite_recorded_frames(void);
+/* Bolex info line: milliseconds left before a delayed REC starts (0 = no countdown) */
+extern WEAK_FUNC(ret_0) int mlv_lite_countdown_ms(void);

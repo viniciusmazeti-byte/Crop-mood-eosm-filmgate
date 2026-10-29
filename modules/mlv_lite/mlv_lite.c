@@ -442,6 +442,35 @@ static volatile                 int buffer_full = 0;                /* true when
 static GUARDED_BY(RawRecTask)   char chunk_filename[MAX_WRITER_THREADS][MAX_PATH];          /* file name for current movie chunk */
 static GUARDED_BY(RawRecTask)   int64_t written_total[MAX_WRITER_THREADS] = {0};          /* how many bytes we have written in this movie */
 static GUARDED_BY(RawRecTask)   int64_t written_chunk[MAX_WRITER_THREADS] = {0};          /* same for current chunk */
+
+/* Bolex: REC starts after a countdown, and the last seconds of each take (the shake of
+ * pressing stop) are dropped.  Dropping: every video frame written is remembered (chunk,
+ * offset, size; the last BOLEX_TAIL of them), and at the end the last ones get their block
+ * type changed to NULL - a padding block every MLV reader skips - and the frame count in the
+ * file header is lowered.  A take shorter than that is deleted. */
+#define BOLEX_REC_DELAY_MS  3000
+#define BOLEX_TRIM_S        2
+#define BOLEX_TAIL          192     /* more than BOLEX_TRIM_S at any Bolex frame rate */
+static int bolex_rec_at = 0;        /* clock time the countdown ends, 0 = none */
+static struct { int chunk; uint32_t offset; uint32_t size; } bolex_tail[BOLEX_TAIL];
+static int bolex_tail_n = 0;        /* video frames written in this take */
+
+static void bolex_tail_add(int chunk, uint32_t offset, uint32_t size)
+{
+    int i = bolex_tail_n % BOLEX_TAIL;
+    bolex_tail[i].chunk = chunk;
+    bolex_tail[i].offset = offset;
+    bolex_tail[i].size = size;
+    bolex_tail_n++;
+}
+
+/* Bolex info line (crop_rec.c): milliseconds left before REC starts, 0 = no countdown */
+static void raw_start_stop();   /* below */
+
+int mlv_lite_countdown_ms(void)
+{
+    return bolex_rec_at ? MAX(1, bolex_rec_at - get_ms_clock()) : 0;
+}
 static GUARDED_BY(RawRecTask)   int writing_time[MAX_WRITER_THREADS] = {0};               /* time spent by raw_video_rec_task in FIO_WriteFile calls */
 static GUARDED_BY(RawRecTask)   int idle_time[MAX_WRITER_THREADS] = {0};                  /* time spent by raw_video_rec_task doing something else */
 static volatile                 uint32_t edmac_active = 0;
@@ -2513,6 +2542,18 @@ unsigned int raw_rec_polling_cbr(unsigned int unused)
 
     bolex_raw_settings();
 
+    /* Bolex countdown: start when it ends; cancelled if Live View, the menu or the state change */
+    if (bolex_rec_at)
+    {
+        if (!lv || gui_menu_shown() || !RAW_IS_IDLE || !is_movie_mode())
+            bolex_rec_at = 0;
+        else if (get_ms_clock() >= bolex_rec_at)
+        {
+            bolex_rec_at = 0;
+            raw_start_stop();
+        }
+    }
+
     static int lvrecov_aux = INT_MIN;
     if (should_run_polling_action(100, &lvrecov_aux))
         lvrecov_log_state();
@@ -4121,6 +4162,7 @@ void raw_video_rec_task(uint32_t thread)
             chunk_frame_count[t] = 0;
         }
         mlv_chunk = 0;
+        bolex_tail_n = 0;
         buffer_full = 0;
         pill_compression_ratio = 0;   /* start the pill's averages fresh for each clip */
         pill_write_speed = 0;
@@ -4461,6 +4503,19 @@ void raw_video_rec_task(uint32_t thread)
         last_write_timestamp = get_ms_clock();
         writing_time[thread] += last_write_timestamp - t0;
 
+        /* Bolex: remember where each video frame of the group landed (for the end trim) */
+        if (thread == 0)
+        {
+            uint32_t pos = (uint32_t)(written_chunk[thread] - group_size);
+            for (int i = w_head; i != after_last_grouped; INC_MOD(i, COUNT(writing_queue)))
+            {
+                int slot_index = writing_queue[i];
+                if (!slots[slot_index].is_meta)
+                    bolex_tail_add(mlv_chunk, pos, slots[slot_index].size);
+                pos += slots[slot_index].size;
+            }
+        }
+
         /* for detecting early stops */
         last_block_size = MOD(after_last_grouped - w_head, COUNT(writing_queue));
 
@@ -4676,6 +4731,8 @@ abort_and_check_early_stop:
                 beep();
                 break;
             }
+            if (!slots[slot_index].is_meta)
+                bolex_tail_add(mlv_chunk, (uint32_t)(written_chunk[thread] - slots[slot_index].size), slots[slot_index].size);
             free_slot(slot_index);
         }
     }
@@ -4704,7 +4761,41 @@ cleanup:
         gui_uilock(UILOCK_EVERYTHING);
     }
 #endif
+    /* Bolex: drop the last BOLEX_TRIM_S seconds (see bolex_tail_add) */
+    int bolex_drop_take = 0;
+    if (bolex_format() && thread == 0 && f && written_total[thread])
+    {
+        int fps_now = fps_get_current_x1000();
+        int trim = (BOLEX_TRIM_S * fps_now + 500) / 1000;
+        trim = MIN(trim, BOLEX_TAIL);
+        if (bolex_tail_n <= trim)
+            bolex_drop_take = 1;    /* nothing left: the whole take goes */
+        else
+        {
+            for (int k = 1; k <= trim; k++)
+            {
+                int i = (bolex_tail_n - k) % BOLEX_TAIL;
+                if (bolex_tail[i].chunk != mlv_chunk)
+                    break;          /* in an earlier, closed chunk (4 GB split): leave it */
+                mlv_hdr_t nul_hdr;
+                mlv_set_type(&nul_hdr, "NULL");
+                nul_hdr.blockSize = bolex_tail[i].size;
+                nul_hdr.timestamp = 0;
+                FIO_SeekSkipFile(f, bolex_tail[i].offset, SEEK_SET);
+                if (FIO_WriteFile(f, &nul_hdr, sizeof(nul_hdr)) == (int) sizeof(nul_hdr))
+                    chunk_frame_count[thread]--;
+            }
+        }
+    }
+
     if (f) finish_chunk(f, thread);
+
+    if (bolex_drop_take && named_clip)
+    {
+        FIO_RemoveFile(raw_movie_filename);
+        raw_movie_filename[0] = 0;
+    }
+
     if (!written_total[thread])
     {
         /* Only touch the movie file name if this run actually chose one.  An early
@@ -5137,6 +5228,13 @@ unsigned int raw_rec_keypress_cbr(unsigned int key)
         if (!compress_mq)
         {
             /* not initialized; block the event */
+            return 0;
+        }
+
+        /* Bolex: REC starts after a countdown; REC again during it cancels it */
+        if (bolex_format() && RAW_IS_IDLE)
+        {
+            bolex_rec_at = bolex_rec_at ? 0 : get_ms_clock() + BOLEX_REC_DELAY_MS;
             return 0;
         }
 

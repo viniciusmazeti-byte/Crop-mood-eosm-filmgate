@@ -7062,6 +7062,16 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     int exp_us = bolex_exposure_us(canon_us, fps);
     int angle = (int)((int64_t) exp_us * fps * 360 / 1000000000LL);
 
+    /* REC pressed: the countdown before recording starts (mlv_lite), in yellow */
+    int countdown = mlv_lite_countdown_ms();
+    if (countdown && !RECORDING)
+    {
+        snprintf(buffer, 64, "GRAVANDO EM %d ...   (REC de novo cancela)", (countdown + 999) / 1000);
+        item->color_bg = COLOR_YELLOW;
+        item->color_fg = COLOR_BLACK;
+        return;
+    }
+
     /* recording: the time filmed so far, in red (mlv_lite's own status is not on this screen) */
     if (RECORDING)
     {
