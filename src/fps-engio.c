@@ -1542,8 +1542,28 @@ static volatile int fps_timerA_override = 0;
 static volatile int fps_timerB_override = 0;
 static volatile int fps_timers_updated = 0;
 
+#ifdef CONFIG_BOLEX
+/* Bolex "Sena" (crop_rec.c): crop_rec's Timer B to apply now, 0 = none.  Written here, from the
+ * EVF state like the FPS override's timers, whenever it changes, so the frame rate can change
+ * while recording.  crop_rec returns the same value when Canon writes the timer itself. */
+int bolex_timer_b_live = 0;
+#endif
+
 void fps_update_timers_from_evfstate()
 {
+#ifdef CONFIG_BOLEX
+    {
+        static int last = 0;
+        int b = bolex_timer_b_live;
+        if (b && b != last && lv)
+        {
+            EngDrvOutLV(FPS_REGISTER_B, b);
+            EngDrvOutLV(FPS_REGISTER_CONFIRM_CHANGES, 1);
+        }
+        last = b;
+    }
+#endif
+
     if (fps_timerA_override && fps_timerB_override && !fps_video_mode_changed())
     {
         EngDrvOutLV(FPS_REGISTER_A, fps_timerA_override);

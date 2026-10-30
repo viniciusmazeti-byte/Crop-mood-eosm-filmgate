@@ -38,42 +38,49 @@ int main(void)
 {
     const int want = BOLEX_SHUTTER_X1000;
 
-    /* filmed at 32 fps (976p readout, Bolex timers), played at 18; 360 degrees is 1/32 s */
-    CHECK(BOLEX_FPS_X1000 == 32000, "Bolex camera speed %d", BOLEX_FPS_X1000);
-    double fps = 32e6 / ((BOLEX_3X3_TIMER_A + 1.0) * (BOLEX_3X3_TIMER_B + 1.0));
-    CHECK(fabs(fps - 32.0) < 0.01, "976p timers give %.4f fps, not 32", fps);
+    /* Sena: 12 fps in Live View, 4 / 6 / 8 / 12 fps drawn while recording, played at 24,
+     * always 360 degrees */
+    CHECK(BOLEX_FPS_X1000 == 12000, "Live View speed %d", BOLEX_FPS_X1000);
+    CHECK(BOLEX_PLAY_FPS == 24, "projection speed %d", BOLEX_PLAY_FPS);
+    CHECK(BOLEX_ANGLE == 360, "shutter angle %d", BOLEX_ANGLE);
+    CHECK(want == 12000, "360 degrees at 12 fps must be 1/12 s, got 1/%d.%03d", want / 1000, want % 1000);
     CHECK(BOLEX_3X3_TIMER_A == 0x20F, "Timer A 0x%X, not 976p's line time 0x20F", BOLEX_3X3_TIMER_A);
-    /* the frame (Timer B lines) is longer than the 976p readout (RAW_V 0x3ED) */
-    CHECK(BOLEX_3X3_TIMER_B > 0x3ED + 100, "Timer B 0x%X too short for 1005 lines", BOLEX_3X3_TIMER_B);
-    printf("976p timers: %.4f fps, rolling shutter over 972 lines %.1f ms\n", fps,
-           972 * (BOLEX_3X3_TIMER_A + 1.0) / 32e6 * 1000);
-    CHECK(BOLEX_PLAY_FPS == 18, "Bolex projection speed %d", BOLEX_PLAY_FPS);
-    CHECK(BOLEX_ANGLE == 133, "Bolex shutter angle %d", BOLEX_ANGLE);
-    CHECK(want > 86000 && want < 87000, "133 degrees at 32 fps must be ~1/86.6 s, got 1/%d.%03d", want / 1000, want % 1000);
+    CHECK(SENA_HOLD_MIN_MS == 500 && SENA_HOLD_MAX_MS == 2000, "hold %d..%d ms", SENA_HOLD_MIN_MS, SENA_HOLD_MAX_MS);
+    for (int i = 0; i < (int)(sizeof sena_fps / sizeof sena_fps[0]); i++)
+    {
+        int b = sena_timer_b(sena_fps[i]);
+        double f = 32e6 / ((BOLEX_3X3_TIMER_A + 1.0) * (b + 1.0));
+        printf("Sena %2d fps: Timer B %d -> %.3f fps, %.1fx faster at 24\n", sena_fps[i], b, f, 24.0 / f);
+        CHECK(fabs(f - sena_fps[i]) < 0.01, "%d fps -> %.3f", sena_fps[i], f);
+        CHECK(b > 0x3ED + 100 && b <= 0xFFFF, "Timer B %d out of range (976p frame, 16 bits)", b);
+        /* 360 degrees: Canon 1/30 is the whole frame at this speed */
+        int us = (int)(1e6 * pow(2.0, (56 - BOLEX_RAW_SHUTTER) / 8.0));
+        int fx = sena_fps[i] * 1000;
+        CHECK(bolex_exposure_us(us, fx) == 1000000000 / fx, "%d fps: exposure %d us, not the whole frame", sena_fps[i], bolex_exposure_us(us, fx));
+    }
+    CHECK(sena_timer_b(BOLEX_FPS_X1000 / 1000) == 5050 - 1, "12 fps Timer B %d", sena_timer_b(12));
+
+    /* the speed draw: never the same speed twice in a row, all speeds used, holds in range */
+    {
+        uint32_t seed = 12345;
+        int cur = -1, seen[8] = {0};
+        for (int n = 0; n < 1000; n++)
+        {
+            int i;
+            do i = sena_rand(&seed) % (sizeof sena_fps / sizeof sena_fps[0]); while (i == cur);
+            CHECK(i != cur, "same speed twice");
+            cur = i; seen[i]++;
+            int hold = SENA_HOLD_MIN_MS + sena_rand(&seed) % (SENA_HOLD_MAX_MS - SENA_HOLD_MIN_MS + 1);
+            CHECK(hold >= SENA_HOLD_MIN_MS && hold <= SENA_HOLD_MAX_MS, "hold %d", hold);
+        }
+        for (int i = 0; i < (int)(sizeof sena_fps / sizeof sena_fps[0]); i++)
+            CHECK(seen[i] > 150, "speed %d drawn %d times of 1000", sena_fps[i], seen[i]);
+    }
 
     /* Up / Down arrows: ISO 100 / 200 / 400, no wrap-around */
     CHECK(bolex_isos[0] == ISO_100 && bolex_isos[1] == ISO_200 && bolex_isos[2] == ISO_400, "ISO list");
     CHECK(bolex_iso_step(0, 1) == 1 && bolex_iso_step(1, 1) == 2 && bolex_iso_step(2, 1) == 2, "ISO up");
     CHECK(bolex_iso_step(2, -1) == 1 && bolex_iso_step(0, -1) == 0, "ISO down");
-
-    /* the one shutter: Canon raw 108 at 31.999 fps, through crop_rec's mapping, is ~133 degrees
-     * (a Bolex H16 Reflex), and no other Canon 1/8-EV code is nearer */
-    {
-        int fps = 31999, best = 0, best_err = 1000;
-        for (int raw = 96; raw <= 152; raw++)
-        {
-            int us = (int)(1e6 * pow(2.0, (56 - raw) / 8.0));
-            int angle = (int)((long long) bolex_exposure_us(us, fps) * fps * 360 / 1000000000LL);
-            int err = abs(angle - 133);
-            if (err < best_err) { best_err = err; best = raw; }
-        }
-        int us = (int)(1e6 * pow(2.0, (56 - BOLEX_RAW_SHUTTER) / 8.0));
-        int angle = (int)((long long) bolex_exposure_us(us, fps) * fps * 360 / 1000000000LL);
-        printf("shutter raw %d: 1/%d s, %d degrees (nearest to 133: raw %d)\n", BOLEX_RAW_SHUTTER,
-               1000000 / bolex_exposure_us(us, fps), angle, best);
-        CHECK(BOLEX_RAW_SHUTTER == best, "raw %d is not the nearest to 133 degrees (%d is)", BOLEX_RAW_SHUTTER, best);
-        CHECK(angle >= 128 && angle <= 138, "angle %d", angle);
-    }
 
     /* the real exposure at 23.976 fps: Canon 1/30 is the whole frame (360 degrees), faster
      * Canon values shorter, 1/4000 almost nothing */

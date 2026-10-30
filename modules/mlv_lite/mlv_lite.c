@@ -448,8 +448,8 @@ static GUARDED_BY(RawRecTask)   int64_t written_chunk[MAX_WRITER_THREADS] = {0};
  * offset, size; the last BOLEX_TAIL of them), and at the end the last ones get their block
  * type changed to NULL - a padding block every MLV reader skips - and the frame count in the
  * file header is lowered.  A take shorter than that is deleted. */
-#define BOLEX_REC_DELAY_MS  3000
-#define BOLEX_TRIM_S        2
+#define BOLEX_REC_DELAY_MS  0       /* Sena: none (Bolex project: 3000) */
+#define BOLEX_TRIM_S        0       /* Sena: none (Bolex project: 2) */
 #define BOLEX_TAIL          192     /* more than BOLEX_TRIM_S at any Bolex frame rate */
 static int bolex_rec_at = 0;        /* clock time the countdown ends, 0 = none */
 static struct { int chunk; uint32_t offset; uint32_t size; } bolex_tail[BOLEX_TAIL];
@@ -4806,7 +4806,7 @@ cleanup:
      * file is closed (bolex_trim_file).  A take that short is deleted. */
     int bolex_drop_take = 0;
     int bolex_trim_n = 0;
-    if (bolex_format() && thread == 0 && f && written_total[thread])
+    if (BOLEX_TRIM_S > 0 && bolex_format() && thread == 0 && f && written_total[thread])
     {
         int fps_now = fps_get_current_x1000();
         if (fps_now <= 0)
@@ -5282,7 +5282,7 @@ unsigned int raw_rec_keypress_cbr(unsigned int key)
         }
 
         /* Bolex: REC starts after a countdown; REC again during it cancels it */
-        if (bolex_format() && RAW_IS_IDLE)
+        if (BOLEX_REC_DELAY_MS > 0 && bolex_format() && RAW_IS_IDLE)
         {
             bolex_rec_at = bolex_rec_at ? 0 : get_ms_clock() + BOLEX_REC_DELAY_MS;
             return 0;

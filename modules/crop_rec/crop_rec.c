@@ -122,6 +122,8 @@ static int bolex_fmt = 0;       /* BOLEX_4_3 (2) once crop_rec_init has run; 0 =
  * a longer frame: 32 MHz / (0x210 * 0x766) = 31.999 fps */
 #define BOLEX_3X3_TIMER_A   0x20F
 #define BOLEX_3X3_TIMER_B   0x765
+/* src/fps-engio.c (Bolex core): Timer B to write live from the EVF state, 0 = none (Sena) */
+extern int bolex_timer_b_live;
 
 
 /* customized buttons variables
@@ -2481,11 +2483,11 @@ static inline uint32_t reg_override_3X3(uint32_t reg, uint32_t old_val)
                 YUV_HD_S_V    = 0x1050165;
             }
 
-            /* Bolex: 32 fps on this 976p readout (see BOLEX_3X3_TIMER_A) */
+            /* Bolex Sena: the speed of the moment on this 976p readout (sena_task) */
             if (bolex_fmt && is_EOSM)
             {
                 TimerA        = BOLEX_3X3_TIMER_A;
-                TimerB        = BOLEX_3X3_TIMER_B;
+                TimerB        = bolex_timer_b_live ? bolex_timer_b_live : BOLEX_3X3_TIMER_B;
             }
         }
         
@@ -6838,8 +6840,18 @@ static void slim_cover_hold_and_release(int hold_ms)
     lens_display_set_dirty();
 }
 
-/* ---- Bolex ---------------------------------------------------------------------------------
- * This build turns the EOS M into a Bolex: one format, everything fixed, no ML menu.
+/* ---- Bolex: "Sena" mode -------------------------------------------------------------------
+ * This build turns the EOS M into a camera for Teo Hernandez's L'Eau de la Seine (1983): the
+ * camera as a gesture of the body, light turned into strokes, black as matter.  Everything
+ * fixed, no ML menu.  (Branch "sena", from the "Bolex" project, branch "bolex".)
+ *
+ * The frame rate changes by itself while recording, 4 / 6 / 8 / 12 fps drawn at random every
+ * 0.5 - 2 s (sena_task), always at 360 degrees, and the file plays at 24: everything runs 2x to
+ * 6x faster, each frame a long exposure where lights become strokes.  The brightness pulses with
+ * the speed (a frame at 4 fps gets ~2.5 stops more light than one at 24): wanted, like flashes.
+ * Idle (Live View): 12 fps.  The speed is changed live: crop_rec's Timer B (bolex_timer_b_live)
+ * is written from the EVF state each time it changes (src/fps-engio.c), and the same value is
+ * returned when Canon writes the timer itself (reg_override_3X3).
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -6850,27 +6862,46 @@ static void slim_cover_hold_and_release(int hold_ms)
  *        readout at 32 fps, 1104x828 (small frame); 1620p 1x1 (red focus-pixel grid, ~1 s
  *        takes).
  *
- * Like a Bolex run at 32 fps and projected at 18: 976p's line time (Timer A 0x20F), a longer
- * frame (BOLEX_3X3_TIMER_B): 31.999 fps; mlv_lite labels the file 18 fps (plays at 56%).
+ * (Bolex project: a fixed 32 fps, labelled 18 fps, 133 degrees.)
  *
  * Exposure: no FPS override (with a crop_rec preset it scaled the exposure twice: 1/771, camera
  * test).  crop_rec alone turns Canon's shutter into the sensor's exposure; with the full
  * shutter range Canon's 1/30 .. 1/4000 spread over the whole frame .. nothing.  Canon's movie
  * size must be 1920x1080 at 24/25/30p for that (otherwise the info line says what to set).
- * One shutter, like a Bolex H16 Reflex: ~133 degrees (BOLEX_RAW_SHUTTER, ~1/88 s at 32 fps);
- * light is set with the lens and ND.  (Tried and removed: 360 degrees with the rear dial /
- * Left-Right arrows to change it - on the camera the clicks never changed it.)
- * ISO 100 / 200 / 400 on the Up / Down arrows.
+ * One shutter: 360 degrees (Canon 1/30 = the whole frame, at any of the speeds); light is set
+ * with the lens (a zoom, turned while filming, is part of the language) and ND.
+ * ISO 100 / 200 / 400 on the Up / Down arrows.  No countdown, no end trim, no blue filter.
  *
  * INFO does nothing.  (Tried and removed: readings with fewer lines, 3x7 / 3x10 - the screen of
  * every reading Canon or crop mood never calibrated stays black or hangs; and an in-camera
  * stabilizer moving the recorded window - on the camera it made the picture jolt.)
  */
 #define BOLEX_4_3           2   /* the only format; 0 = not a Bolex build */
-#define BOLEX_FPS_X1000     32000   /* camera speed (31.999); the file plays at BOLEX_PLAY_FPS */
-#define BOLEX_PLAY_FPS      18      /* projection speed written in the file */
-#define BOLEX_ANGLE         133     /* Bolex H16 Reflex; the nearest Canon step gives ~131 */
-#define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 133 degrees: ~1/87 s, as 1/x * 1000 */
+#define BOLEX_FPS_X1000     12000   /* camera speed in Live View; while recording see sena_fps[] */
+#define BOLEX_PLAY_FPS      24      /* projection speed written in the file */
+#define BOLEX_ANGLE         360
+#define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 360 degrees at 12 fps: 1/12 s */
+
+/* Sena: the speeds drawn while recording, and how long each lasts (ms of real time) */
+static const int sena_fps[] = { 4, 6, 8, 12 };
+#define SENA_HOLD_MIN_MS    500
+#define SENA_HOLD_MAX_MS    2000
+
+/* crop_rec Timer B (period - 1, 32 MHz / Timer A 0x210 lines) for a whole frame rate */
+static int sena_timer_b(int fps)
+{
+    return 32000000 / ((BOLEX_3X3_TIMER_A + 1) * fps) - 1;
+}
+
+/* the next random number (a plain LCG is enough to draw speeds and durations) */
+static uint32_t sena_rand(uint32_t * seed)
+{
+    *seed = *seed * 1664525u + 1013904223u;
+    return *seed >> 16;
+}
+
+/* when the take being recorded started (clock ms), 0 = not recording; for the info line */
+static int sena_rec_start = 0;
 
 /* src/gui-common.c (Bolex core): 1 once Canon has sent an INFO release.  The EOS M may not
  * send one at all; the rewind (hold INFO) needs to know.  Shown on screen. */
@@ -6891,10 +6922,9 @@ static int bolex_iso_step(int index, int sign)
     return COERCE(index + sign, 0, (int)COUNT(bolex_isos) - 1);
 }
 
-/* The one shutter: Canon raw code 108 (1/8 EV steps: 96 = 1/30, 104 = 1/60, 112 = 1/125), Canon's
- * "1/90".  crop_rec turns it into ~1/88 s at 32 fps (bolex_exposure_us): ~131 degrees, the Canon
- * step nearest to a Bolex H16 Reflex's ~133 (107 would give ~143). */
-#define BOLEX_RAW_SHUTTER   108
+/* The one shutter: Canon raw code 96, 1/30 (1/8 EV steps: 104 = 1/60, 112 = 1/125), which
+ * crop_rec's full shutter range makes the whole frame: 360 degrees at any speed. */
+#define BOLEX_RAW_SHUTTER   96
 
 /* The exposure the sensor really gets, in microseconds, for Canon's shutter (us) at fps_x1000:
  * crop_rec's mapping with the full shutter range in a 24-30p Canon mode (adjust_shutter_blanking:
@@ -6906,6 +6936,47 @@ static int bolex_exposure_us(int canon_us, int fps_x1000)
     int frame_us = (int)(1000000000LL / fps_x1000);
     int64_t us = (int64_t)(canon_us - 250) * 33613 / fps_x1000;
     return (int) COERCE(us, 1, frame_us);
+}
+
+/* Sena: the speed.  While recording, a new speed from sena_fps[] (never the same twice in a row)
+ * every SENA_HOLD_MIN_MS .. SENA_HOLD_MAX_MS; otherwise BOLEX_FPS_X1000.  Only sets
+ * bolex_timer_b_live; the core writes it at the next frame. */
+static void sena_task(void)
+{
+    uint32_t seed = (uint32_t) get_ms_clock() * 2654435761u + 1;
+    int cur = -1;
+    int next = 0;
+    while (1)
+    {
+        msleep(50);
+        if (!bolex_fmt)
+            continue;
+        int now = get_ms_clock();
+        if (RECORDING)
+        {
+            if (!sena_rec_start)
+            {
+                sena_rec_start = now;
+                next = 0;
+            }
+            if (now >= next)
+            {
+                int i;
+                do
+                    i = sena_rand(&seed) % COUNT(sena_fps);
+                while (i == cur);
+                cur = i;
+                next = now + SENA_HOLD_MIN_MS + sena_rand(&seed) % (SENA_HOLD_MAX_MS - SENA_HOLD_MIN_MS + 1);
+                bolex_timer_b_live = sena_timer_b(sena_fps[cur]);
+            }
+        }
+        else
+        {
+            sena_rec_start = 0;
+            cur = -1;
+            bolex_timer_b_live = sena_timer_b(BOLEX_FPS_X1000 / 1000);
+        }
+    }
 }
 
 /* used by mlv_lite (resolution, bit depth) and the core: BOLEX_4_3, or 0 */
@@ -6969,22 +7040,11 @@ static int bolex_canon_mode_ok(void)
  * itself is the same either way (it is the sensor's); only the white balance changes. */
 #define BOLEX_WB_NORMAL     5500    /* as in the user's crop mood setup */
 #define BOLEX_WB_BLUE       2800
-static int bolex_blue = 0;
+static int bolex_blue = 0;      /* Sena: always off (the blue filter is the Bolex project's) */
 
-/* INFO twice (within half a second): the blue filter on / off */
+/* INFO: does nothing */
 static void bolex_info_pressed(void)
 {
-    static int last = 0;
-    int now = get_ms_clock();
-    if (last && now - last < 500)
-    {
-        last = 0;
-        bolex_blue = !bolex_blue;
-        lens_set_kelvin(bolex_blue ? BOLEX_WB_BLUE : BOLEX_WB_NORMAL);
-        NotifyBox(1500, bolex_blue ? "Filtro azul" : "Sem filtro");
-        return;
-    }
-    last = now;
 }
 
 /* Live View, not recording, no menu: keep the video mode, 32 fps, ISO 100 and 360 degrees */
@@ -7098,8 +7158,8 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     /* recording: the time filmed so far, in red (mlv_lite's own status is not on this screen) */
     if (RECORDING)
     {
-        int frames = mlv_lite_recorded_frames();
-        int secs = fps > 0 ? (int)((int64_t) frames * 1000 / fps) : 0;
+        /* the speed changes during the take: real time since it started (sena_task) */
+        int secs = sena_rec_start ? (get_ms_clock() - sena_rec_start) / 1000 : 0;
         snprintf(buffer, 64, "REC %d:%02d   %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d",
             secs / 60, secs % 60,
             fps / 1000, fps % 1000,
@@ -7112,7 +7172,7 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
         return;
     }
 
-    snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT%s",
+    snprintf(buffer, 64, "SENA  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT%s",
         fps / 1000, fps % 1000,
         BOLEX_PLAY_FPS,
         exp_us > 0 ? (1000000 + exp_us / 2) / exp_us : 0,
@@ -8504,6 +8564,7 @@ static unsigned int crop_rec_init()
         /* Bolex: one format; everything else is fixed */
         bolex_fmt = BOLEX_4_3;
         bolex_fixed_settings();
+        task_create("sena_task", 0x1e, 0x1000, sena_task, 0);
         fps_override_force(0, BOLEX_FPS_X1000);    /* earlier Bolex builds saved it on */
         lvinfo_add_items(bolex_info_items, COUNT(bolex_info_items));
 
