@@ -525,6 +525,37 @@ static int sena_kelvin(uint32_t seed, int frame)
     return SENA_KELVIN_MIN + (int)(x % (SENA_KELVIN_MAX - SENA_KELVIN_MIN + 1));
 }
 
+/* Sena: frames dropped at random while recording - they never reach the file, the movement
+ * jumps.  Mixed: a kept frame starts a drop with SENA_DROP_START_PERMIL / 1000, of 1 frame
+ * (40%), 2 (25%), 3 (20%) or 4 (15%) frames (mean 2.1), and the frame after a drop is always
+ * kept: about 2 frames in 5 dropped, never more than 4 in a row. */
+#define SENA_DROP_START_PERMIL  317
+static uint32_t sena_drop_seed = 1;
+static int sena_drop_left = 0;      /* frames still to drop in the current burst */
+
+static int sena_drop_frame(uint32_t * seed, int * left)
+{
+    if (*left > 0)
+    {
+        /* still in a burst; after its last frame, one frame is always kept (-1) */
+        *left = (*left == 1) ? -1 : *left - 1;
+        return 1;
+    }
+    if (*left < 0)
+    {
+        *left = 0;
+        return 0;
+    }
+    *seed = *seed * 1664525u + 1013904223u;
+    if ((*seed >> 16) % 1000 >= SENA_DROP_START_PERMIL)
+        return 0;
+    *seed = *seed * 1664525u + 1013904223u;
+    int r = (*seed >> 16) % 100;
+    int burst = r < 40 ? 1 : r < 65 ? 2 : r < 85 ? 3 : 4;
+    *left = burst > 1 ? burst - 1 : -1;
+    return 1;
+}
+
 /* write name.KEL next to the clip name.MLV: n frames */
 static void sena_write_kelvins(const char * mlv_name, uint32_t seed, int n)
 {
@@ -3712,6 +3743,10 @@ void process_frame(int next_fullsize_buffer_pos)
         skip_frames--;
         return;
     }
+
+    /* Sena: random frames dropped (never the first one of a take) */
+    if (bolex_format() && frame_count > 1 && sena_drop_frame(&sena_drop_seed, &sena_drop_left))
+        return;
     
     if (edmac_active)
     {
@@ -4257,6 +4292,8 @@ void raw_video_rec_task(uint32_t thread)
         mlv_chunk = 0;
         bolex_tail_n = 0;
         sena_kelvin_seed = (uint32_t) get_ms_clock() * 2654435761u ^ 0x5E7A;
+        sena_drop_seed = sena_kelvin_seed ^ 0xD80Bu;
+        sena_drop_left = 0;
         buffer_full = 0;
         pill_compression_ratio = 0;   /* start the pill's averages fresh for each clip */
         pill_write_speed = 0;

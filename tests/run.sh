@@ -52,6 +52,8 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define SENA_KELVIN_MIN"
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define SENA_KELVIN_MAX"
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c function sena_kelvin
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define SENA_DROP_START_PERMIL"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c function sena_drop_frame
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c function calc_res_y
 } > "$OUT/bolex_mlv_snippets.h"
 

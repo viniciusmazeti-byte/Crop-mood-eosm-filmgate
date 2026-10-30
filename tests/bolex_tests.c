@@ -112,6 +112,21 @@ int main(void)
         printf("Sena kelvins: %d..%d, quarters %d %d %d %d\n", lo, hi, bins[0], bins[1], bins[2], bins[3]);
     }
 
+    /* Sena frame drops: about 2 in 5, bursts of 1..4, never longer */
+    {
+        uint32_t seed = 77; int left = 0, dropped = 0, run = 0, maxrun = 0, bursts[5] = {0};
+        for (int f = 0; f < 100000; f++)
+        {
+            if (sena_drop_frame(&seed, &left)) { dropped++; run++; }
+            else { if (run) bursts[run > 4 ? 4 : run]++; maxrun = run > maxrun ? run : maxrun; run = 0; }
+        }
+        double frac = dropped / 100000.0;
+        printf("Sena drops: %.1f%% dropped, bursts 1:%d 2:%d 3:%d 4+:%d, longest %d\n", frac * 100, bursts[1], bursts[2], bursts[3], bursts[4], maxrun);
+        CHECK(frac > 0.37 && frac < 0.43, "dropped %.3f, not ~0.4", frac);
+        CHECK(bursts[1] > 0 && bursts[2] > 0 && bursts[3] > 0 && bursts[4] > 0, "all burst lengths");
+        CHECK(maxrun == 4, "longest run %d, not 4", maxrun);
+    }
+
     /* 976p 3x3 readout: 976 picture lines, square pixels, the centre 4:3 recorded */
     check_43("4:3 976p", 976, 2);
     CHECK(BOLEX_RES_X == 1296, "width %d", BOLEX_RES_X);
