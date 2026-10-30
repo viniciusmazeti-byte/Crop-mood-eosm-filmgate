@@ -504,6 +504,59 @@ static int bolex_trim_file(const char * name, int n)
     return done;
 }
 
+/* Sena: a colour temperature for every frame, drawn in the camera and written next to the clip
+ * (name.KEL, "frame kelvin" per line).  The RAW data keeps no colour temperature, and MLV App
+ * reads one per clip, so the lab (tools/sena_lab.py) applies these, frame by frame, to the clip
+ * developed at SENA_KELVIN_BASE.  Drawn from the take's seed and the frame number, so nothing
+ * is kept in memory while recording. */
+#define SENA_KELVIN_MIN     2000
+#define SENA_KELVIN_MAX     6000
+#define SENA_KELVIN_BASE    5500    /* the white balance the camera writes in the file (crop_rec) */
+static uint32_t sena_kelvin_seed = 0;
+
+static int sena_kelvin(uint32_t seed, int frame)
+{
+    uint32_t x = seed ^ ((uint32_t) frame * 2654435761u);
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    x *= 2246822519u;
+    x ^= x >> 15;
+    return SENA_KELVIN_MIN + (int)(x % (SENA_KELVIN_MAX - SENA_KELVIN_MIN + 1));
+}
+
+/* write name.KEL next to the clip name.MLV: n frames */
+static void sena_write_kelvins(const char * mlv_name, uint32_t seed, int n)
+{
+    char name[100];
+    snprintf(name, sizeof(name), "%s", mlv_name);
+    int L = strlen(name);
+    if (L < 4 || name[L - 4] != '.')
+        return;
+    memcpy(name + L - 4, ".KEL", 4);
+
+    FILE * f = FIO_CreateFile(name);
+    if (!f)
+        return;
+    static char buf[4096];
+    int len = snprintf(buf, sizeof(buf),
+        "# Sena colour temperature per frame (frame kelvin), %d frames\n"
+        "# develop the clip at %d K, then apply with tools/sena_lab.py\n"
+        "# seed %u\n", n, SENA_KELVIN_BASE, (unsigned) seed);
+    for (int i = 0; i < n; i++)
+    {
+        if (len > (int) sizeof(buf) - 32)
+        {
+            FIO_WriteFile(f, buf, len);
+            len = 0;
+        }
+        len += snprintf(buf + len, sizeof(buf) - len, "%d %d\n", i, sena_kelvin(seed, i));
+    }
+    if (len)
+        FIO_WriteFile(f, buf, len);
+    FIO_CloseFile(f);
+}
+
 /* Bolex info line (crop_rec.c): milliseconds left before REC starts, 0 = no countdown */
 static void raw_start_stop();   /* below */
 
@@ -4203,6 +4256,7 @@ void raw_video_rec_task(uint32_t thread)
         }
         mlv_chunk = 0;
         bolex_tail_n = 0;
+        sena_kelvin_seed = (uint32_t) get_ms_clock() * 2654435761u ^ 0x5E7A;
         buffer_full = 0;
         pill_compression_ratio = 0;   /* start the pill's averages fresh for each clip */
         pill_write_speed = 0;
@@ -4838,6 +4892,10 @@ cleanup:
         else
             NotifyBox(4000, "Corte do fim falhou (%d de %d)", done, bolex_trim_n);
     }
+
+    /* Sena: the colour temperature of every frame written in this take */
+    if (bolex_format() && thread == 0 && named_clip && !bolex_drop_take && bolex_tail_n > 0)
+        sena_write_kelvins(raw_movie_filename, sena_kelvin_seed, bolex_tail_n);
 
     if (bolex_drop_take && named_clip)
     {

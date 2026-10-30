@@ -93,6 +93,25 @@ int main(void)
         CHECK(bolex_exposure_us(0, 0) == 0, "no fps");
     }
 
+    /* Sena colour temperature per frame: 2000..6000 K, spread over the range, the same for the
+     * same seed and frame (the .KEL is written at the end from them), different per take */
+    {
+        int lo = 99999, hi = 0, bins[4] = {0}, same = 1;
+        for (int f = 0; f < 4000; f++)
+        {
+            int k = sena_kelvin(0x1234u, f);
+            lo = k < lo ? k : lo; hi = k > hi ? k : hi;
+            bins[(k - SENA_KELVIN_MIN) * 4 / (SENA_KELVIN_MAX - SENA_KELVIN_MIN + 1)]++;
+            same &= (k == sena_kelvin(0x1234u, f));
+        }
+        CHECK(lo >= 2000 && hi <= 6000 && lo < 2050 && hi > 5950, "kelvin range %d..%d", lo, hi);
+        for (int b = 0; b < 4; b++)
+            CHECK(bins[b] > 800, "kelvin quarter %d drawn %d of 4000", b, bins[b]);
+        CHECK(same, "kelvin not repeatable");
+        CHECK(sena_kelvin(0x1234u, 7) != sena_kelvin(0x9876u, 7) || sena_kelvin(0x1234u, 8) != sena_kelvin(0x9876u, 8), "seed has no effect");
+        printf("Sena kelvins: %d..%d, quarters %d %d %d %d\n", lo, hi, bins[0], bins[1], bins[2], bins[3]);
+    }
+
     /* 976p 3x3 readout: 976 picture lines, square pixels, the centre 4:3 recorded */
     check_43("4:3 976p", 976, 2);
     CHECK(BOLEX_RES_X == 1296, "width %d", BOLEX_RES_X);
