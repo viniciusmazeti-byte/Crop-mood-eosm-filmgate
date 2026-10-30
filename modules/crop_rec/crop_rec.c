@@ -6845,10 +6845,12 @@ static void slim_cover_hold_and_release(int hold_ms)
  * camera as a gesture of the body, light turned into strokes, black as matter.  Everything
  * fixed, no ML menu.  (Branch "sena", from the "Bolex" project, branch "bolex".)
  *
- * The frame rate changes by itself while recording, 4 / 6 / 8 / 12 fps drawn at random every
- * 0.5 - 2 s (sena_task), always at 360 degrees, and the file plays at 24: everything runs 2x to
- * 6x faster, each frame a long exposure where lights become strokes.  The brightness pulses with
- * the speed (a frame at 4 fps gets ~2.5 stops more light than one at 24): wanted, like flashes.
+ * The frame rate changes by itself while recording, 8 / 10 / 12 / 14 / 16 / 18 fps drawn at
+ * random every 0.5 - 2 s (sena_task), always at 360 degrees, and the file plays at 24:
+ * everything runs 1.3x to 3x faster, each frame a long exposure where lights become strokes.
+ * The brightness pulses with the speed (8 fps gets ~1.2 stops more light than 18): wanted.
+ * (First camera test, 4 / 6 / 8 / 12 fps: "too crude" at 24 - the 4-6 fps stretches played
+ * 4-6x faster, almost a slideshow.)
  * Idle (Live View): 12 fps.  The speed is changed live: crop_rec's Timer B (bolex_timer_b_live)
  * is written from the EVF state each time it changes (src/fps-engio.c), and the same value is
  * returned when Canon writes the timer itself (reg_override_3X3).
@@ -6883,7 +6885,7 @@ static void slim_cover_hold_and_release(int hold_ms)
 #define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 360 degrees at 12 fps: 1/12 s */
 
 /* Sena: the speeds drawn while recording, and how long each lasts (ms of real time) */
-static const int sena_fps[] = { 4, 6, 8, 12 };
+static const int sena_fps[] = { 8, 10, 12, 14, 16, 18 };
 #define SENA_HOLD_MIN_MS    500
 #define SENA_HOLD_MAX_MS    2000
 

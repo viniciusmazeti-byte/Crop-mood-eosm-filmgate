@@ -38,7 +38,7 @@ int main(void)
 {
     const int want = BOLEX_SHUTTER_X1000;
 
-    /* Sena: 12 fps in Live View, 4 / 6 / 8 / 12 fps drawn while recording, played at 24,
+    /* Sena: 12 fps in Live View, 8 .. 18 fps drawn while recording, played at 24,
      * always 360 degrees */
     CHECK(BOLEX_FPS_X1000 == 12000, "Live View speed %d", BOLEX_FPS_X1000);
     CHECK(BOLEX_PLAY_FPS == 24, "projection speed %d", BOLEX_PLAY_FPS);
@@ -74,7 +74,7 @@ int main(void)
             CHECK(hold >= SENA_HOLD_MIN_MS && hold <= SENA_HOLD_MAX_MS, "hold %d", hold);
         }
         for (int i = 0; i < (int)(sizeof sena_fps / sizeof sena_fps[0]); i++)
-            CHECK(seen[i] > 150, "speed %d drawn %d times of 1000", sena_fps[i], seen[i]);
+            CHECK(seen[i] > 100, "speed %d drawn %d times of 1000", sena_fps[i], seen[i]);
     }
 
     /* Up / Down arrows: ISO 100 / 200 / 400, no wrap-around */
