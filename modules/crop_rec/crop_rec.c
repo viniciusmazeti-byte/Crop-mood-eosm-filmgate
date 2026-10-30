@@ -6845,12 +6845,12 @@ static void slim_cover_hold_and_release(int hold_ms)
  * camera as a gesture of the body, light turned into strokes, black as matter.  Everything
  * fixed, no ML menu.  (Branch "sena", from the "Bolex" project, branch "bolex".)
  *
- * The frame rate changes by itself while recording, 8 / 10 / 12 / 14 / 16 / 18 fps drawn at
- * random every 0.5 - 2 s (sena_task), always at 360 degrees, and the file plays at 24:
- * everything runs 1.3x to 3x faster, each frame a long exposure where lights become strokes.
- * The brightness pulses with the speed (8 fps gets ~1.2 stops more light than 18): wanted.
- * (First camera test, 4 / 6 / 8 / 12 fps: "too crude" at 24 - the 4-6 fps stretches played
- * 4-6x faster, almost a slideshow.)
+ * The frame rate changes by itself while recording, 4 / 6 / 8 / 12 fps drawn at random every
+ * 0.5 - 2 s (sena_task), always at 360 degrees, and the file plays at 12: from real time to 3x
+ * faster, each frame a long exposure where lights become strokes, each held on screen 1/12 s.
+ * The brightness pulses with the speed (4 fps gets ~1.6 stops more light than 12): wanted.
+ * (Camera tests: 4-12 fps played at 24 looked too crude, almost a slideshow; 8-18 fps at 24
+ * looked stuck and odd, "not alive"; the 4-12 fps take played at 12 looked best.)
  * Idle (Live View): 12 fps.  The speed is changed live: crop_rec's Timer B (bolex_timer_b_live)
  * is written from the EVF state each time it changes (src/fps-engio.c), and the same value is
  * returned when Canon writes the timer itself (reg_override_3X3).
@@ -6880,12 +6880,12 @@ static void slim_cover_hold_and_release(int hold_ms)
  */
 #define BOLEX_4_3           2   /* the only format; 0 = not a Bolex build */
 #define BOLEX_FPS_X1000     12000   /* camera speed in Live View; while recording see sena_fps[] */
-#define BOLEX_PLAY_FPS      24      /* projection speed written in the file */
+#define BOLEX_PLAY_FPS      12      /* projection speed written in the file */
 #define BOLEX_ANGLE         360
 #define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 360 degrees at 12 fps: 1/12 s */
 
 /* Sena: the speeds drawn while recording, and how long each lasts (ms of real time) */
-static const int sena_fps[] = { 8, 10, 12, 14, 16, 18 };
+static const int sena_fps[] = { 4, 6, 8, 12 };
 #define SENA_HOLD_MIN_MS    500
 #define SENA_HOLD_MAX_MS    2000
 

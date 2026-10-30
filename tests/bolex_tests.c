@@ -38,10 +38,10 @@ int main(void)
 {
     const int want = BOLEX_SHUTTER_X1000;
 
-    /* Sena: 12 fps in Live View, 8 .. 18 fps drawn while recording, played at 24,
+    /* Sena: 12 fps in Live View, 4 .. 12 fps drawn while recording, played at 12,
      * always 360 degrees */
     CHECK(BOLEX_FPS_X1000 == 12000, "Live View speed %d", BOLEX_FPS_X1000);
-    CHECK(BOLEX_PLAY_FPS == 24, "projection speed %d", BOLEX_PLAY_FPS);
+    CHECK(BOLEX_PLAY_FPS == 12, "projection speed %d", BOLEX_PLAY_FPS);
     CHECK(BOLEX_ANGLE == 360, "shutter angle %d", BOLEX_ANGLE);
     CHECK(want == 12000, "360 degrees at 12 fps must be 1/12 s, got 1/%d.%03d", want / 1000, want % 1000);
     CHECK(BOLEX_3X3_TIMER_A == 0x20F, "Timer A 0x%X, not 976p's line time 0x20F", BOLEX_3X3_TIMER_A);
@@ -50,7 +50,7 @@ int main(void)
     {
         int b = sena_timer_b(sena_fps[i]);
         double f = 32e6 / ((BOLEX_3X3_TIMER_A + 1.0) * (b + 1.0));
-        printf("Sena %2d fps: Timer B %d -> %.3f fps, %.1fx faster at 24\n", sena_fps[i], b, f, 24.0 / f);
+        printf("Sena %2d fps: Timer B %d -> %.3f fps, %.1fx faster at %d\n", sena_fps[i], b, f, BOLEX_PLAY_FPS / f, BOLEX_PLAY_FPS);
         CHECK(fabs(f - sena_fps[i]) < 0.01, "%d fps -> %.3f", sena_fps[i], f);
         CHECK(b > 0x3ED + 100 && b <= 0xFFFF, "Timer B %d out of range (976p frame, 16 bits)", b);
         /* 360 degrees: Canon 1/30 is the whole frame at this speed */
@@ -74,7 +74,7 @@ int main(void)
             CHECK(hold >= SENA_HOLD_MIN_MS && hold <= SENA_HOLD_MAX_MS, "hold %d", hold);
         }
         for (int i = 0; i < (int)(sizeof sena_fps / sizeof sena_fps[0]); i++)
-            CHECK(seen[i] > 100, "speed %d drawn %d times of 1000", sena_fps[i], seen[i]);
+            CHECK(seen[i] > 150, "speed %d drawn %d times of 1000", sena_fps[i], seen[i]);
     }
 
     /* Up / Down arrows: ISO 100 / 200 / 400, no wrap-around */
