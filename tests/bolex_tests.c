@@ -39,17 +39,11 @@ int main(void)
     const int want = BOLEX_SHUTTER_X1000;
 
     /* filmed at 32 fps (976p readout, Bolex timers), played at 18; 360 degrees is 1/32 s */
-    CHECK(BOLEX_FPS_X1000 == 32000, "Bolex camera speed %d", BOLEX_FPS_X1000);
-    double fps = 32e6 / ((BOLEX_3X3_TIMER_A + 1.0) * (BOLEX_3X3_TIMER_B + 1.0));
-    CHECK(fabs(fps - 32.0) < 0.01, "976p timers give %.4f fps, not 32", fps);
-    CHECK(BOLEX_3X3_TIMER_A == 0x20F, "Timer A 0x%X, not 976p's line time 0x20F", BOLEX_3X3_TIMER_A);
-    /* the frame (Timer B lines) is longer than the 976p readout (RAW_V 0x3ED) */
-    CHECK(BOLEX_3X3_TIMER_B > 0x3ED + 100, "Timer B 0x%X too short for 1005 lines", BOLEX_3X3_TIMER_B);
-    printf("976p timers: %.4f fps, rolling shutter over 972 lines %.1f ms\n", fps,
-           972 * (BOLEX_3X3_TIMER_A + 1.0) / 32e6 * 1000);
+    /* Bolex 2.8K: filmed at 23.976 (dannephoto's 2.8K timers), played at 18 */
+    CHECK(BOLEX_FPS_X1000 == 24000, "Bolex camera speed %d", BOLEX_FPS_X1000);
     CHECK(BOLEX_PLAY_FPS == 18, "Bolex projection speed %d", BOLEX_PLAY_FPS);
     CHECK(BOLEX_ANGLE == 133, "Bolex shutter angle %d", BOLEX_ANGLE);
-    CHECK(want > 86000 && want < 87000, "133 degrees at 32 fps must be ~1/86.6 s, got 1/%d.%03d", want / 1000, want % 1000);
+    CHECK(want > 64000 && want < 66000, "133 degrees at 24 fps must be ~1/65 s, got 1/%d.%03d", want / 1000, want % 1000);
 
     /* Up / Down arrows: ISO 100 / 200 / 400, no wrap-around */
     CHECK(bolex_isos[0] == ISO_100 && bolex_isos[1] == ISO_200 && bolex_isos[2] == ISO_400, "ISO list");
@@ -59,7 +53,7 @@ int main(void)
     /* the one shutter: Canon raw 108 at 31.999 fps, through crop_rec's mapping, is ~133 degrees
      * (a Bolex H16 Reflex), and no other Canon 1/8-EV code is nearer */
     {
-        int fps = 31999, best = 0, best_err = 1000;
+        int fps = 23976, best = 0, best_err = 1000;
         for (int raw = 96; raw <= 152; raw++)
         {
             int us = (int)(1e6 * pow(2.0, (56 - raw) / 8.0));
@@ -87,8 +81,8 @@ int main(void)
     }
 
     /* 976p 3x3 readout: 976 picture lines, square pixels, the centre 4:3 recorded */
-    check_43("4:3 976p", 976, 2);
-    CHECK(BOLEX_RES_X == 1296, "width %d", BOLEX_RES_X);
+    check_43("4:3 2.8K", 1226, 0);
+    CHECK(BOLEX_RES_X == ((1226 * 4 / 3) & ~15), "width %d", BOLEX_RES_X);
 
     /* the width suits the raw format (8 pixels) and the lossless encoder (16) */
     CHECK(BOLEX_RES_X % 16 == 0, "width %d is not a multiple of 16", BOLEX_RES_X);

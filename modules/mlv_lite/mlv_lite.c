@@ -1050,10 +1050,9 @@ void update_cropping_offsets()
     }
 }
 
-/* Bolex recorded width: the centre 4:3 of dannephoto's 976p (3x3, 1736x976): 1296x972.
- * (Earlier: 1104 of the 3x5 / 3x3 3:2 readouts, sized for the 25 mm's image circle - black
- * started at ~76% of a 1536-wide frame's half diagonal; then the whole 1620p, 2160.) */
-#define BOLEX_RES_X 1296
+/* Bolex 2.8K recorded width: the centre 4:3 of dannephoto's 1x1 2.8K (2880x1226): 1632x1224,
+ * worked out from the readout height in update_resolution_params (kept here for the tests). */
+#define BOLEX_RES_X 1632
 
 static REQUIRES(settings_sem)
 void update_resolution_params()
@@ -1090,7 +1089,7 @@ void update_resolution_params()
      * readout (square pixels).  On a stretched readout (3x5) the RAWC block says by how much. */
     if (bolex_format())
     {
-        res_x = MIN(BOLEX_RES_X, max_res_x);
+        res_x = MIN((max_res_y * 4 / 3) & ~15, max_res_x);   /* 4:3 with the full height */
         num = 4;
         den = 3;
     }

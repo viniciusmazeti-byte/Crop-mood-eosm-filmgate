@@ -6840,6 +6840,10 @@ static void slim_cover_hold_and_release(int hold_ms)
 
 /* ---- Bolex ---------------------------------------------------------------------------------
  * This build turns the EOS M into a Bolex: one format, everything fixed, no ML menu.
+ * (Branch "bolex28k": the Bolex on dannephoto's 1x1 2.8K readout, 2880x1226 - no binning, no
+ * line skipping - recorded as its centre 4:3, 1632x1224, ~7 x 5.3 mm of sensor.  2.8K cannot
+ * reach 32 fps (dannephoto: 24/25; 30 gave no LCD image), so it films at 23.976 and the file
+ * plays at 18 (75%).  Rolling shutter ~31 ms over the frame.  Below: the "bolex" branch notes.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -6867,7 +6871,7 @@ static void slim_cover_hold_and_release(int hold_ms)
  * stabilizer moving the recorded window - on the camera it made the picture jolt.)
  */
 #define BOLEX_4_3           2   /* the only format; 0 = not a Bolex build */
-#define BOLEX_FPS_X1000     32000   /* camera speed (31.999); the file plays at BOLEX_PLAY_FPS */
+#define BOLEX_FPS_X1000     24000   /* camera speed (2.8K: 23.976); the file plays at BOLEX_PLAY_FPS */
 #define BOLEX_PLAY_FPS      18      /* projection speed written in the file */
 #define BOLEX_ANGLE         133     /* Bolex H16 Reflex; the nearest Canon step gives ~131 */
 #define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 133 degrees: ~1/87 s, as 1/x * 1000 */
@@ -6926,13 +6930,14 @@ static void bolex_fixed_settings(void)
     if (!bolex_fmt)
         return;
 
-    /* the readout: dannephoto's 976p, crop_rec 3x3 High FPS 16:9 (slim menu state in step) */
-    crop_preset_3x3_res_menu = 0;       /* High FPS */
-    crop_preset_ar_menu = 0;            /* 16:9: 1736x976 */
-    crop_preset_fps_menu = 2;           /* 30 (not 24: no 23.976 snapping); the Bolex timers replace it */
-    slim_mode_ui = 2;                   /* 3x3 */
-    if (crop_preset_index != 3)
-        crop_preset_index = 3;          /* 3x3 */
+    /* the readout: dannephoto's 1x1 2.8K (2880x1226, every pixel) at 23.976, slim menu in step */
+    crop_preset_1x1_res_menu = 1;       /* CROP_2_8K */
+    crop_preset_fps_menu = 0;           /* 23.976 (dannephoto's 2.8K timers) */
+    slim_mode_ui = 0;                   /* 1x1 */
+    slim_1x1_ar = 1;                    /* 2.35:1 */
+    slim_unified_preset = 1;            /* Higher = 2.8K */
+    if (crop_preset_index != 1)
+        crop_preset_index = 1;          /* 1x1 */
 
     /* exposure from crop_rec alone, Canon's slowest shutter = the whole frame */
     shutter_range = 1;
@@ -7112,7 +7117,7 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
         return;
     }
 
-    snprintf(buffer, 64, "4:3  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT%s",
+    snprintf(buffer, 64, "2.8K  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT%s",
         fps / 1000, fps % 1000,
         BOLEX_PLAY_FPS,
         exp_us > 0 ? (1000000 + exp_us / 2) / exp_us : 0,
