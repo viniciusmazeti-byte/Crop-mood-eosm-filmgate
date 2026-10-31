@@ -36,19 +36,21 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "#define BOLEX_PLAY_FPS"
   python3 tests/extract.py $CR line     "#define BOLEX_ANGLE"
   python3 tests/extract.py $CR line     "#define BOLEX_SHUTTER_X1000"
-  python3 tests/extract.py $CR line     "#define BOLEX_PLAY_FPS"
-  python3 tests/extract.py $CR line     "#define BOLEX_RAMP_FROM_FPS"
-  python3 tests/extract.py $CR line     "#define BOLEX_RAMP_MS"
+  python3 tests/extract.py $CR function bolex_blanking
+  python3 tests/extract.py $CR line     "#define BOLEX_FPS_MIN_X1000"
+  python3 tests/extract.py $CR line     "#define BOLEX_FPS_MAX_X1000"
+  python3 tests/extract.py $CR line     "#define BOLEX_WANDER_HOLD_MIN_MS"
+  python3 tests/extract.py $CR line     "#define BOLEX_WANDER_HOLD_MAX_MS"
+  python3 tests/extract.py $CR line     "#define BOLEX_WANDER_TAU_MS"
   python3 tests/extract.py $CR line     "#define BOLEX_1620_TIMER_A"
   python3 tests/extract.py $CR line     "#define BOLEX_1620_TIMER_B"
   python3 tests/extract.py $CR function bolex_timer_b_for
-  python3 tests/extract.py $CR function bolex_ramp_timer_b
-  python3 tests/extract.py $CR line     "#define BOLEX_3X3_TIMER_A"
-  python3 tests/extract.py $CR line     "#define BOLEX_3X3_TIMER_B"
-  python3 tests/extract.py $CR line     "#define BOLEX_RAW_SHUTTER"
+  python3 tests/extract.py $CR line     "struct bolex_wander {"
+  python3 tests/extract.py $CR function bolex_rand
+  python3 tests/extract.py $CR function bolex_wander_start
+  python3 tests/extract.py $CR function bolex_wander_step
   python3 tests/extract.py $CR line     "static const int bolex_isos[]"
   python3 tests/extract.py $CR function bolex_iso_step
-  python3 tests/extract.py $CR function bolex_exposure_us
 } > "$OUT/bolex_snippets.h"
 {
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_RES_X"
@@ -64,6 +66,9 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_int_next
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_DROP_PERMIL"
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_drop_frame
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_TRIM_MS"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_HEAD_MS"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_trim_count
 } > "$OUT/bolex_mlv_snippets.h"
 
 # 2. structure check: the film table exists once, in src/film-formats.h only

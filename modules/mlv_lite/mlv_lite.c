@@ -443,25 +443,42 @@ static GUARDED_BY(RawRecTask)   char chunk_filename[MAX_WRITER_THREADS][MAX_PATH
 static GUARDED_BY(RawRecTask)   int64_t written_total[MAX_WRITER_THREADS] = {0};          /* how many bytes we have written in this movie */
 static GUARDED_BY(RawRecTask)   int64_t written_chunk[MAX_WRITER_THREADS] = {0};          /* same for current chunk */
 
-/* Bolex: REC starts after a countdown, and the last seconds of each take (the shake of
- * pressing stop) are dropped.  Dropping: every video frame written is remembered (chunk,
- * offset, size; the last BOLEX_TAIL of them), and at the end the last ones get their block
- * type changed to NULL - a padding block every MLV reader skips - and the frame count in the
- * file header is lowered.  A take shorter than that is deleted. */
-#define BOLEX_REC_DELAY_MS  0       /* off for now (was 3000) */
-#define BOLEX_TRIM_S        0       /* off for now (was 2) */
-#define BOLEX_TAIL          192     /* more than BOLEX_TRIM_S at any Bolex frame rate */
+/* Bolex: the first and the last second of each take (the shake of pressing REC and stop) are
+ * dropped.  The first: its frames are not recorded (process_frame, BOLEX_HEAD_MS from the first
+ * frame).  The last: every video frame written is remembered (chunk, offset, size, the time it
+ * was filmed; the last BOLEX_TAIL of them), and at the end the ones filmed in the last
+ * BOLEX_TRIM_MS get their block type changed to NULL - a padding block every MLV reader skips -
+ * and the frame count in the file header is lowered.  Counted by time, not frames, since the
+ * speed wanders.  A take shorter than that is deleted.  (The countdown before REC is off.) */
+#define BOLEX_REC_DELAY_MS  0       /* off (was 3000) */
+#define BOLEX_HEAD_MS       1000    /* the first second, not recorded */
+#define BOLEX_TRIM_MS       1000    /* the last second, cut */
+#define BOLEX_TAIL          192     /* more than BOLEX_TRIM_MS at any Bolex frame rate */
+#define BOLEX_CAP           512     /* filming times kept, by frame number (frames still in memory) */
 static int bolex_rec_at = 0;        /* clock time the countdown ends, 0 = none */
-static struct { int chunk; uint32_t offset; uint32_t size; } bolex_tail[BOLEX_TAIL];
+static struct { int chunk; uint32_t offset; uint32_t size; int ms; } bolex_tail[BOLEX_TAIL];
 static int bolex_tail_n = 0;        /* video frames written in this take */
+static int bolex_take_t0 = 0;       /* clock time of the take's first frame, 0 = not yet */
+static int bolex_cap_ms[BOLEX_CAP]; /* when frame number n was filmed: [n % BOLEX_CAP] */
 
-static void bolex_tail_add(int chunk, uint32_t offset, uint32_t size)
+static void bolex_tail_add(int chunk, uint32_t offset, uint32_t size, int frame_number)
 {
     int i = bolex_tail_n % BOLEX_TAIL;
     bolex_tail[i].chunk = chunk;
     bolex_tail[i].offset = offset;
     bolex_tail[i].size = size;
+    bolex_tail[i].ms = bolex_cap_ms[frame_number % BOLEX_CAP];
     bolex_tail_n++;
+}
+
+/* how many of the last n frames written (times[k] = when the k-th from the end was filmed,
+ * k = 0 the last) were filmed within trim_ms of the last one */
+static int bolex_trim_count(const int * times, int n, int trim_ms)
+{
+    int k = 0;
+    while (k < n && times[0] - times[k] < trim_ms)
+        k++;
+    return k;
 }
 
 /* Bolex: turn the last n frames of the take (bolex_tail) into NULL blocks in the closed file
@@ -3746,6 +3763,16 @@ void process_frame(int next_fullsize_buffer_pos)
         return;
     }
 
+    /* Bolex: the first second of the take is not recorded */
+    if (bolex_format())
+    {
+        int now = get_ms_clock();
+        if (!bolex_take_t0)
+            bolex_take_t0 = now;
+        if (now - bolex_take_t0 < BOLEX_HEAD_MS)
+            return;
+    }
+
     /* some modules may do some specific stuff right when we started recording */
     if (frame_count == 1)
     {
@@ -3793,6 +3820,7 @@ void process_frame(int next_fullsize_buffer_pos)
     {
         /* okay */
         slots[capture_slot].frame_number = frame_count;
+        bolex_cap_ms[frame_count % BOLEX_CAP] = get_ms_clock();
         slots[capture_slot].status = SLOT_CAPTURING;
         frame_add_checks(capture_slot);
 
@@ -4306,6 +4334,7 @@ void raw_video_rec_task(uint32_t thread)
         }
         mlv_chunk = 0;
         bolex_tail_n = 0;
+        bolex_take_t0 = 0;
         bolex_int_seed = (uint32_t) get_ms_clock() * 2654435761u ^ 0xB01E;
         bolex_drop_seed = bolex_int_seed ^ 0xD80Bu;
         bolex_drop_last = 0;
@@ -4657,7 +4686,7 @@ void raw_video_rec_task(uint32_t thread)
             {
                 int slot_index = writing_queue[i];
                 if (!slots[slot_index].is_meta)
-                    bolex_tail_add(mlv_chunk, pos, slots[slot_index].size);
+                    bolex_tail_add(mlv_chunk, pos, slots[slot_index].size, slots[slot_index].frame_number);
                 pos += slots[slot_index].size;
             }
         }
@@ -4878,7 +4907,7 @@ abort_and_check_early_stop:
                 break;
             }
             if (!slots[slot_index].is_meta)
-                bolex_tail_add(mlv_chunk, (uint32_t)(written_chunk[thread] - slots[slot_index].size), slots[slot_index].size);
+                bolex_tail_add(mlv_chunk, (uint32_t)(written_chunk[thread] - slots[slot_index].size), slots[slot_index].size, slots[slot_index].frame_number);
             free_slot(slot_index);
         }
     }
@@ -4907,17 +4936,18 @@ cleanup:
         gui_uilock(UILOCK_EVERYTHING);
     }
 #endif
-    /* Bolex: drop the last BOLEX_TRIM_S seconds (see bolex_tail_add).  The header written by
-     * finish_chunk gets the lower frame count; the blocks themselves are changed once the
-     * file is closed (bolex_trim_file).  A take that short is deleted. */
+    /* Bolex: drop the frames filmed in the last BOLEX_TRIM_MS (see bolex_tail_add).  The header
+     * written by finish_chunk gets the lower frame count; the blocks themselves are changed
+     * once the file is closed (bolex_trim_file).  A take that short is deleted. */
     int bolex_drop_take = 0;
     int bolex_trim_n = 0;
-    if (BOLEX_TRIM_S > 0 && bolex_format() && thread == 0 && f && written_total[thread])
+    if (BOLEX_TRIM_MS > 0 && bolex_format() && thread == 0 && f && written_total[thread])
     {
-        int fps_now = fps_get_current_x1000();
-        if (fps_now <= 0)
-            fps_now = 32000;
-        int trim = MIN((BOLEX_TRIM_S * fps_now + 500) / 1000, BOLEX_TAIL);
+        static int times[BOLEX_TAIL];
+        int n = MIN(bolex_tail_n, BOLEX_TAIL);
+        for (int k = 0; k < n; k++)
+            times[k] = bolex_tail[(bolex_tail_n - 1 - k) % BOLEX_TAIL].ms;
+        int trim = bolex_trim_count(times, n, BOLEX_TRIM_MS);
         if (bolex_tail_n <= trim)
             bolex_drop_take = 1;
         else
@@ -4940,14 +4970,14 @@ cleanup:
         char * name = mlv_chunk ? chunk_filename[thread] : raw_movie_filename;
         int done = bolex_trim_file(name, bolex_trim_n);
         if (done == bolex_trim_n)
-            NotifyBox(2000, "Fim cortado: -%d.%d s", done * 10000 / MAX(fps, 1) / 10, done * 10000 / MAX(fps, 1) % 10);
+            NotifyBox(2000, "Cortado: 1 s no inicio, %d quadros no fim", done);
         else
             NotifyBox(4000, "Corte do fim falhou (%d de %d)", done, bolex_trim_n);
     }
 
     /* Bolex: the intermittency of every frame written in this take */
     if (bolex_format() && thread == 0 && named_clip && !bolex_drop_take && bolex_tail_n > 0)
-        bolex_write_intermittency(raw_movie_filename, bolex_int_seed, bolex_tail_n);
+        bolex_write_intermittency(raw_movie_filename, bolex_int_seed, bolex_tail_n - bolex_trim_n);
 
     if (bolex_drop_take && named_clip)
     {

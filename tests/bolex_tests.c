@@ -1,4 +1,4 @@
-/* Tests for the Bolex speeds (32 fps played at 18), its shutter (360 degrees) and its correction in crop_rec.c - run on a computer, see tests/run.sh */
+/* Tests for the Bolex 1620p: its wandering speed, its 133 degree shutter, the cuts, the intermittency - run on a computer, see tests/run.sh */
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -40,30 +40,67 @@ int main(void)
 {
     const int want = BOLEX_SHUTTER_X1000;
 
-    /* filmed at 32 fps (976p readout, Bolex timers), played at 18; 360 degrees is 1/32 s */
-    /* Bolex 1620p: filmed at 23.976 (dannephoto's 1620p timers), played at 18 */
+    /* Bolex 1620p: filmed at 20..25 fps (dannephoto's 1620p line time), played at 24, 133 degrees */
     CHECK(BOLEX_FPS_X1000 == 24000, "Bolex camera speed %d", BOLEX_FPS_X1000);
     CHECK(BOLEX_ANGLE == 133, "Bolex shutter angle %d", BOLEX_ANGLE);
     CHECK(want > 64000 && want < 66000, "133 degrees at 24 fps must be ~1/65 s, got 1/%d.%03d", want / 1000, want % 1000);
 
-    /* the speed: 18 fps at the start of a take, rising to 23.976 over BOLEX_RAMP_MS, then held;
+    /* the speed: wandering between 20 and 25 fps all through a take, smooth, using the range;
      * the file plays at 24 */
     CHECK(BOLEX_PLAY_FPS == 24, "projection speed %d", BOLEX_PLAY_FPS);
+    CHECK(bolex_timer_b_for(25000) == 0x7E2 && bolex_timer_b_for(23976) == BOLEX_1620_TIMER_B, "timers %x %x",
+          bolex_timer_b_for(25000), bolex_timer_b_for(23976));
     {
-        double f0 = 32e6 / ((BOLEX_1620_TIMER_A + 1.0) * (bolex_ramp_timer_b(0) + 1.0));
-        double fe = 32e6 / ((BOLEX_1620_TIMER_A + 1.0) * (bolex_ramp_timer_b(BOLEX_RAMP_MS) + 1.0));
-        CHECK(fabs(f0 - 18.0) < 0.01, "start %.3f fps", f0);
-        CHECK(fabs(fe - 23.976) < 0.01 && bolex_ramp_timer_b(BOLEX_RAMP_MS + 5000) == BOLEX_1620_TIMER_B, "end %.3f fps", fe);
-        int prev = bolex_ramp_timer_b(0);
-        for (int t = 0; t <= BOLEX_RAMP_MS; t += 40)
+        struct bolex_wander w;
+        int lo = 99999, hi = 0, maxstep = 0, below21 = 0, above24 = 0, n = 0;
+        for (int take = 0; take < 50; take++)
         {
-            int b = bolex_ramp_timer_b(t);
-            CHECK(b <= prev && b >= BOLEX_1620_TIMER_B, "ramp not monotonic at %d ms: %d", t, b);
-            prev = b;
+            bolex_wander_start(&w, 1234567u * (take + 1), 23976);
+            int prev = 23976;
+            for (int t = 0; t < 60000; t += 40, n++)       /* a minute, the task's 40 ms */
+            {
+                int f = bolex_wander_step(&w, 40);
+                CHECK(f >= BOLEX_FPS_MIN_X1000 && f <= BOLEX_FPS_MAX_X1000, "speed %d", f);
+                maxstep = MAX(maxstep, ABS(f - prev));
+                prev = f;
+                lo = f < lo ? f : lo; hi = f > hi ? f : hi;
+                below21 += f < 21000; above24 += f > 24000;
+                int b = bolex_timer_b_for(f);
+                CHECK(b >= 0x7E2 && b <= bolex_timer_b_for(20000), "timer B %x", b);
+            }
         }
-        printf("ramp: %.2f fps at 0 s, %.2f at 0.5 s, %.2f at 1 s, %.2f at 2 s\n", f0,
-               32e6 / ((BOLEX_1620_TIMER_A + 1.0) * (bolex_ramp_timer_b(500) + 1.0)),
-               32e6 / ((BOLEX_1620_TIMER_A + 1.0) * (bolex_ramp_timer_b(1000) + 1.0)), fe);
+        printf("speed: %d..%d fps x1000, largest change per 40 ms %d, %d%% below 21, %d%% above 24\n",
+               lo, hi, maxstep, below21 * 100 / n, above24 * 100 / n);
+        CHECK(lo < 21000 && hi > 24500, "range used %d..%d", lo, hi);
+        CHECK(maxstep <= 150, "a jump of %d", maxstep);
+        CHECK(below21 * 100 / n >= 5 && above24 * 100 / n >= 5, "range rarely reached");
+    }
+
+    /* the shutter: 133 degrees at every speed of the range (the blanking for the Timer B) */
+    for (int f = BOLEX_FPS_MIN_X1000; f <= BOLEX_FPS_MAX_X1000; f += 100)
+    {
+        int tb = bolex_timer_b_for(f) + 1;
+        double angle = 360.0 * (tb - bolex_blanking(tb)) / tb;
+        CHECK(fabs(angle - BOLEX_ANGLE) < 0.3, "%d fps x1000: %.2f degrees", f, angle);
+    }
+    {
+        int t20 = bolex_timer_b_for(20000) + 1, t25 = bolex_timer_b_for(25000) + 1;
+        printf("shutter: 20 fps 1/%.0f s, 25 fps 1/%.0f s (both %d degrees)\n",
+               360.0 * 20 / BOLEX_ANGLE, 360.0 * 25 / BOLEX_ANGLE, BOLEX_ANGLE);
+        (void) t20; (void) t25;
+    }
+
+    /* the cut at the end: by time (the speed wanders), here 1 s of 40 ms frames is 25 */
+    {
+        int times[100];
+        for (int k = 0; k < 100; k++)
+            times[k] = 100000 - k * 40;
+        CHECK(bolex_trim_count(times, 100, BOLEX_TRIM_MS) == 25, "trim %d", bolex_trim_count(times, 100, BOLEX_TRIM_MS));
+        for (int k = 0; k < 100; k++)
+            times[k] = 100000 - k * 50;     /* 20 fps */
+        CHECK(bolex_trim_count(times, 100, BOLEX_TRIM_MS) == 20, "trim 20 fps %d", bolex_trim_count(times, 100, BOLEX_TRIM_MS));
+        CHECK(bolex_trim_count(times, 10, BOLEX_TRIM_MS) == 10, "short take");
+        CHECK(BOLEX_TRIM_MS == 1000 && BOLEX_HEAD_MS == 1000, "1 s at each end");
     }
 
     /* intermittency per frame: within the ranges, the weave smooth (small steps) */
@@ -104,36 +141,6 @@ int main(void)
     CHECK(bolex_isos[0] == ISO_100 && bolex_isos[1] == ISO_200 && bolex_isos[2] == ISO_400, "ISO list");
     CHECK(bolex_iso_step(0, 1) == 1 && bolex_iso_step(1, 1) == 2 && bolex_iso_step(2, 1) == 2, "ISO up");
     CHECK(bolex_iso_step(2, -1) == 1 && bolex_iso_step(0, -1) == 0, "ISO down");
-
-    /* the one shutter: Canon raw 108 at 31.999 fps, through crop_rec's mapping, is ~133 degrees
-     * (a Bolex H16 Reflex), and no other Canon 1/8-EV code is nearer */
-    {
-        int fps = 23976, best = 0, best_err = 1000;
-        for (int raw = 96; raw <= 152; raw++)
-        {
-            int us = (int)(1e6 * pow(2.0, (56 - raw) / 8.0));
-            int angle = (int)((long long) bolex_exposure_us(us, fps) * fps * 360 / 1000000000LL);
-            int err = abs(angle - 133);
-            if (err < best_err) { best_err = err; best = raw; }
-        }
-        int us = (int)(1e6 * pow(2.0, (56 - BOLEX_RAW_SHUTTER) / 8.0));
-        int angle = (int)((long long) bolex_exposure_us(us, fps) * fps * 360 / 1000000000LL);
-        printf("shutter raw %d: 1/%d s, %d degrees (nearest to 133: raw %d)\n", BOLEX_RAW_SHUTTER,
-               1000000 / bolex_exposure_us(us, fps), angle, best);
-        CHECK(BOLEX_RAW_SHUTTER == best, "raw %d is not the nearest to 133 degrees (%d is)", BOLEX_RAW_SHUTTER, best);
-        CHECK(angle >= 128 && angle <= 138, "angle %d", angle);
-    }
-
-    /* the real exposure at 23.976 fps: Canon 1/30 is the whole frame (360 degrees), faster
-     * Canon values shorter, 1/4000 almost nothing */
-    {
-        int fps = 23976, frame = 1000000000 / fps;
-        CHECK(bolex_exposure_us(33333, fps) == frame, "1/30 -> %d us, frame %d", bolex_exposure_us(33333, fps), frame);
-        int e50 = bolex_exposure_us(20000, fps), e100 = bolex_exposure_us(10000, fps), e4000 = bolex_exposure_us(250, fps);
-        printf("exposure at 23.976: Canon 1/50 -> 1/%d, 1/100 -> 1/%d, 1/4000 -> %d us\n", 1000000 / e50, 1000000 / e100, e4000);
-        CHECK(e50 < frame && e100 < e50 && e4000 >= 1 && e4000 < 100, "exposures %d %d %d", e50, e100, e4000);
-        CHECK(bolex_exposure_us(0, 0) == 0, "no fps");
-    }
 
     /* 976p 3x3 readout: 976 picture lines, square pixels, the centre 4:3 recorded */
     check_43("4:3 1620p", 1620, 0);
