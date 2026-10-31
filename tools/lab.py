@@ -23,13 +23,36 @@ The RAW keeps none of this (MLV App uses one white balance per clip), so:
 
 Needs: Python 3, numpy (pip install numpy) and ffmpeg / ffprobe on the PATH.
 """
+import glob
 import os
+import shutil
 import subprocess
 import sys
 
 import numpy as np
 
 BASE_K = 5500
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def find_tool(name):
+    """ffmpeg / ffprobe: next to this script, in any folder under it (e.g. the ffmpeg zip
+    unpacked here, ...\bin\ffmpeg.exe), or on the PATH."""
+    exe = name + ('.exe' if os.name == 'nt' else '')
+    for path in [os.path.join(HERE, exe)] + sorted(glob.glob(os.path.join(HERE, '**', exe), recursive=True)):
+        if os.path.isfile(path):
+            return path
+    found = shutil.which(name)
+    if found:
+        return found
+    print()
+    print('ERRO: nao encontrei o %s.' % exe)
+    print('Baixe o ffmpeg para Windows (gyan.dev, "ffmpeg-release-essentials.zip"),')
+    print('descompacte e coloque o ffmpeg.exe e o ffprobe.exe (ficam na pasta "bin")')
+    print('nesta pasta:  ' + HERE)
+    print('(ou deixe a pasta inteira do ffmpeg descompactada dentro dela).')
+    sys.exit(1)
 
 
 def planck_xy(k):
@@ -104,7 +127,7 @@ def shift(img, dx, dy):
 
 def probe(path):
     out = subprocess.check_output(
-        ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries',
+        [find_tool('ffprobe'), '-v', 'error', '-select_streams', 'v:0', '-show_entries',
          'stream=width,height,r_frame_rate', '-of', 'csv=p=0', path], text=True)
     w, h, r = out.strip().split(',')[:3]
     return int(w), int(h), r
@@ -115,15 +138,16 @@ def run(mov, force=1.0):
     if not os.path.exists(kel) and os.path.exists(kel[:-4] + '.kel'):
         kel = kel[:-4] + '.kel'
     if not os.path.exists(kel):
-        raise SystemExit('missing ' + kel + ' (copy it from the card, next to the .mov)')
+        raise SystemExit('ERRO: falta o ' + kel + ' (copie o .KEL do cartao para junto do .mov, com o mesmo nome)')
     out = os.path.splitext(mov)[0] + '_lab.mov'
     rows, size = read_list(kel)
     w, h, rate = probe(mov)
     scale = (w / size[0]) if size else 1.0      # the offsets are in recorded pixels
 
-    dec = subprocess.Popen(['ffmpeg', '-v', 'error', '-i', mov, '-f', 'rawvideo',
+    ffmpeg = find_tool('ffmpeg')
+    dec = subprocess.Popen([ffmpeg, '-v', 'error', '-i', mov, '-f', 'rawvideo',
                             '-pix_fmt', 'rgb48le', '-'], stdout=subprocess.PIPE)
-    enc = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le',
+    enc = subprocess.Popen([ffmpeg, '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le',
                             '-s', '%dx%d' % (w, h), '-r', rate, '-i', '-',
                             '-c:v', 'prores_ks', '-profile:v', '3', '-pix_fmt', 'yuv422p10le',
                             '-vendor', 'apl0', out], stdin=subprocess.PIPE)
@@ -154,7 +178,7 @@ def run(mov, force=1.0):
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
-        raise SystemExit(__doc__)
+        raise SystemExit('Arraste o .mov exportado do MLV App sobre o lab.bat (com o .KEL ao lado).')
     args, force = sys.argv[1:], 1.0
     if args and args[0] == '--forca':
         force, args = float(args[1]), args[2:]
