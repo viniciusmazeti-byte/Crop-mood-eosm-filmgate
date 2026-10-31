@@ -36,6 +36,13 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "#define BOLEX_PLAY_FPS"
   python3 tests/extract.py $CR line     "#define BOLEX_ANGLE"
   python3 tests/extract.py $CR line     "#define BOLEX_SHUTTER_X1000"
+  python3 tests/extract.py $CR line     "#define BOLEX_PLAY_FPS"
+  python3 tests/extract.py $CR line     "#define BOLEX_RAMP_FROM_FPS"
+  python3 tests/extract.py $CR line     "#define BOLEX_RAMP_MS"
+  python3 tests/extract.py $CR line     "#define BOLEX_1620_TIMER_A"
+  python3 tests/extract.py $CR line     "#define BOLEX_1620_TIMER_B"
+  python3 tests/extract.py $CR function bolex_timer_b_for
+  python3 tests/extract.py $CR function bolex_ramp_timer_b
   python3 tests/extract.py $CR line     "#define BOLEX_3X3_TIMER_A"
   python3 tests/extract.py $CR line     "#define BOLEX_3X3_TIMER_B"
   python3 tests/extract.py $CR line     "#define BOLEX_RAW_SHUTTER"
@@ -46,6 +53,17 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
 {
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_RES_X"
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c function calc_res_y
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_KELVIN_BASE"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_KELVIN_JITTER"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_EV_JITTER_X1000"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_WEAVE_X_X100"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_WEAVE_Y_X100"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_hash
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_jitter
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "struct bolex_int {"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_int_next
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_DROP_PERMIL"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_drop_frame
 } > "$OUT/bolex_mlv_snippets.h"
 
 # 2. structure check: the film table exists once, in src/film-formats.h only

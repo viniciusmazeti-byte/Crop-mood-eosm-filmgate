@@ -448,8 +448,8 @@ static GUARDED_BY(RawRecTask)   int64_t written_chunk[MAX_WRITER_THREADS] = {0};
  * offset, size; the last BOLEX_TAIL of them), and at the end the last ones get their block
  * type changed to NULL - a padding block every MLV reader skips - and the frame count in the
  * file header is lowered.  A take shorter than that is deleted. */
-#define BOLEX_REC_DELAY_MS  3000
-#define BOLEX_TRIM_S        2
+#define BOLEX_REC_DELAY_MS  0       /* off for now (was 3000) */
+#define BOLEX_TRIM_S        0       /* off for now (was 2) */
 #define BOLEX_TAIL          192     /* more than BOLEX_TRIM_S at any Bolex frame rate */
 static int bolex_rec_at = 0;        /* clock time the countdown ends, 0 = none */
 static struct { int chunk; uint32_t offset; uint32_t size; } bolex_tail[BOLEX_TAIL];
@@ -502,6 +502,106 @@ static int bolex_trim_file(const char * name, int n)
     fio_free(buf);
     FIO_CloseFile(g);
     return done;
+}
+
+/* Bolex film intermittency, frame by frame, as a 16 mm camera and projector give it: colour
+ * temperature, exposure and the frame's position (gate weave).  The camera draws them from the
+ * take's seed while writing the take's list at the end (name.KEL next to name.MLV: "frame kelvin
+ * ev dx dy" per line); the lab (tools/lab.py) applies them to the clip developed at
+ * BOLEX_KELVIN_BASE.  Kept out of the RAW, so a take can always be developed without them.
+ *   kelvin  BOLEX_KELVIN_BASE +- BOLEX_KELVIN_JITTER, a new value every frame
+ *   ev      +- BOLEX_EV_JITTER_X1000 / 1000 stop every frame (flicker)
+ *   dx, dy  pixels; a slow wander plus a small jump each frame, more vertical (the pull-down) */
+#define BOLEX_KELVIN_BASE       5500
+#define BOLEX_KELVIN_JITTER     250
+#define BOLEX_EV_JITTER_X1000   100
+#define BOLEX_WEAVE_X_X100      150     /* +- 1.5 px of 2160 */
+#define BOLEX_WEAVE_Y_X100      300     /* +- 3 px of 1620 */
+static uint32_t bolex_int_seed = 0;
+
+static uint32_t bolex_hash(uint32_t seed, int frame, int what)
+{
+    uint32_t x = seed ^ ((uint32_t) frame * 2654435761u) ^ ((uint32_t) what * 0x9E3779B9u);
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    x *= 2246822519u;
+    x ^= x >> 15;
+    return x;
+}
+
+/* a value in -range .. +range from the hash */
+static int bolex_jitter(uint32_t seed, int frame, int what, int range)
+{
+    return (int)(bolex_hash(seed, frame, what) % (2 * range + 1)) - range;
+}
+
+/* the intermittency of n frames, in order (the weave is smooth, so it is worked out frame after
+ * frame: 70% of the previous offset plus a new jump, kept within the range) */
+struct bolex_int { int kelvin; int ev_x1000; int dx_x100; int dy_x100; };
+static void bolex_int_next(uint32_t seed, int frame, struct bolex_int * v)
+{
+    v->kelvin = BOLEX_KELVIN_BASE + bolex_jitter(seed, frame, 1, BOLEX_KELVIN_JITTER);
+    v->ev_x1000 = bolex_jitter(seed, frame, 2, BOLEX_EV_JITTER_X1000);
+    v->dx_x100 = COERCE(v->dx_x100 * 7 / 10 + bolex_jitter(seed, frame, 3, BOLEX_WEAVE_X_X100 / 2), -BOLEX_WEAVE_X_X100, BOLEX_WEAVE_X_X100);
+    v->dy_x100 = COERCE(v->dy_x100 * 7 / 10 + bolex_jitter(seed, frame, 4, BOLEX_WEAVE_Y_X100 / 2), -BOLEX_WEAVE_Y_X100, BOLEX_WEAVE_Y_X100);
+}
+
+/* write name.KEL next to the clip name.MLV: n frames */
+static void bolex_write_intermittency(const char * mlv_name, uint32_t seed, int n)
+{
+    char name[100];
+    snprintf(name, sizeof(name), "%s", mlv_name);
+    int L = strlen(name);
+    if (L < 4 || name[L - 4] != '.')
+        return;
+    memcpy(name + L - 4, ".KEL", 4);
+
+    FILE * f = FIO_CreateFile(name);
+    if (!f)
+        return;
+    static char buf[4096];
+    int len = snprintf(buf, sizeof(buf),
+        "# Bolex intermittency per frame: frame kelvin ev dx dy, %d frames\n"
+        "# develop the clip at %d K, then apply with tools/lab.py\n"
+        "# size %dx%d\n"
+        "# seed %u\n", n, BOLEX_KELVIN_BASE, res_x, res_y, (unsigned) seed);
+    struct bolex_int v = { 0, 0, 0, 0 };
+    for (int i = 0; i < n; i++)
+    {
+        if (len > (int) sizeof(buf) - 64)
+        {
+            FIO_WriteFile(f, buf, len);
+            len = 0;
+        }
+        bolex_int_next(seed, i, &v);
+        len += snprintf(buf + len, sizeof(buf) - len, "%d %d %s%d.%03d %s%d.%02d %s%d.%02d\n", i, v.kelvin,
+            v.ev_x1000 < 0 ? "-" : "", ABS(v.ev_x1000) / 1000, ABS(v.ev_x1000) % 1000,
+            v.dx_x100 < 0 ? "-" : "", ABS(v.dx_x100) / 100, ABS(v.dx_x100) % 100,
+            v.dy_x100 < 0 ? "-" : "", ABS(v.dy_x100) / 100, ABS(v.dy_x100) % 100);
+    }
+    if (len)
+        FIO_WriteFile(f, buf, len);
+    FIO_CloseFile(f);
+}
+
+/* Bolex: a few single frames dropped while recording - they never reach the file, the movement
+ * skips a beat.  A kept frame is dropped with BOLEX_DROP_PERMIL / 1000, and the frame after a
+ * dropped one is always kept: about 1 frame in 40. */
+#define BOLEX_DROP_PERMIL   25
+static uint32_t bolex_drop_seed = 1;
+static int bolex_drop_last = 0;
+
+static int bolex_drop_frame(uint32_t * seed, int * last)
+{
+    if (*last)
+    {
+        *last = 0;
+        return 0;
+    }
+    *seed = *seed * 1664525u + 1013904223u;
+    *last = ((*seed >> 16) % 1000) < BOLEX_DROP_PERMIL;
+    return *last;
 }
 
 /* Bolex info line (crop_rec.c): milliseconds left before REC starts, 0 = no countdown */
@@ -3658,6 +3758,10 @@ void process_frame(int next_fullsize_buffer_pos)
         skip_frames--;
         return;
     }
+
+    /* Bolex: a few single frames dropped (never the first one of a take) */
+    if (bolex_format() && frame_count > 1 && bolex_drop_frame(&bolex_drop_seed, &bolex_drop_last))
+        return;
     
     if (edmac_active)
     {
@@ -4202,6 +4306,9 @@ void raw_video_rec_task(uint32_t thread)
         }
         mlv_chunk = 0;
         bolex_tail_n = 0;
+        bolex_int_seed = (uint32_t) get_ms_clock() * 2654435761u ^ 0xB01E;
+        bolex_drop_seed = bolex_int_seed ^ 0xD80Bu;
+        bolex_drop_last = 0;
         buffer_full = 0;
         pill_compression_ratio = 0;   /* start the pill's averages fresh for each clip */
         pill_write_speed = 0;
@@ -4805,7 +4912,7 @@ cleanup:
      * file is closed (bolex_trim_file).  A take that short is deleted. */
     int bolex_drop_take = 0;
     int bolex_trim_n = 0;
-    if (bolex_format() && thread == 0 && f && written_total[thread])
+    if (BOLEX_TRIM_S > 0 && bolex_format() && thread == 0 && f && written_total[thread])
     {
         int fps_now = fps_get_current_x1000();
         if (fps_now <= 0)
@@ -4837,6 +4944,10 @@ cleanup:
         else
             NotifyBox(4000, "Corte do fim falhou (%d de %d)", done, bolex_trim_n);
     }
+
+    /* Bolex: the intermittency of every frame written in this take */
+    if (bolex_format() && thread == 0 && named_clip && !bolex_drop_take && bolex_tail_n > 0)
+        bolex_write_intermittency(raw_movie_filename, bolex_int_seed, bolex_tail_n);
 
     if (bolex_drop_take && named_clip)
     {
@@ -5281,7 +5392,7 @@ unsigned int raw_rec_keypress_cbr(unsigned int key)
         }
 
         /* Bolex: REC starts after a countdown; REC again during it cancels it */
-        if (bolex_format() && RAW_IS_IDLE)
+        if (BOLEX_REC_DELAY_MS > 0 && bolex_format() && RAW_IS_IDLE)
         {
             bolex_rec_at = bolex_rec_at ? 0 : get_ms_clock() + BOLEX_REC_DELAY_MS;
             return 0;

@@ -118,6 +118,8 @@ static int a35_short_readout = 0;   /* 48 fps on A35 16:9 / 1.85: 1736x958 reado
 
 /* Bolex (see the "Bolex" section further down) */
 static int bolex_fmt = 0;       /* BOLEX_4_3 (2) once crop_rec_init has run; 0 = not yet */
+/* src/fps-engio.c (Bolex core): Timer B to write live from the EVF state, 0 = none */
+extern int bolex_timer_b_live;
 /* Bolex 32 fps on dannephoto's 976p (3x3 High FPS 16:9) readout: its line time (Timer A 0x20F),
  * a longer frame: 32 MHz / (0x210 * 0x766) = 31.999 fps */
 #define BOLEX_3X3_TIMER_A   0x20F
@@ -1850,6 +1852,10 @@ static inline uint32_t reg_override_1X1(uint32_t reg, uint32_t old_val)
              * 29.97 was tried (TimerB 0x693, only ~35 lines of blanking): the LCD shows no image. */
             TimerB   = 0x838;
             if (Framerate_25) TimerB = 0x7E2;
+
+            /* Bolex 1620p: the speed of the moment (bolex_speed_task) */
+            if (bolex_fmt && bolex_timer_b_live)
+                TimerB = bolex_timer_b_live;
         }
 
         Preview_H     = 2156 + reg_Preview_H;  // 2556 causes preview artifacts
@@ -6844,7 +6850,12 @@ static void slim_cover_hold_and_release(int hold_ms)
  * binning, no line skipping, recorded whole, ~9.3 x 7 mm of sensor (about the 16 mm gate).
  * 1620p cannot reach 32 fps (29.97 gave no LCD image), so it films at 23.976 and the file plays
  * at 18 (75%).  10-bit (crop_rec's analog gain): the heaviest readout for the card.  Rolling
- * shutter ~32 ms over the frame.  Like branch "bolex28k" otherwise; below: the "bolex" notes.)
+ * shutter ~32 ms over the frame.  Like branch "bolex28k" otherwise; below: the "bolex" notes.
+ * Now (camera test: "the picture is very good; make it look more like a Bolex"): each take
+ * starts at 18 fps and rises to 23.976 in 2 s, then holds (bolex_speed_task), the file plays at
+ * 24; a few single frames are dropped (mlv_lite); colour, exposure and gate weave change frame
+ * by frame (drawn in mlv_lite, written in name.KEL, applied by tools/lab.py); no countdown, no
+ * end trim.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -6872,8 +6883,61 @@ static void slim_cover_hold_and_release(int hold_ms)
  * stabilizer moving the recorded window - on the camera it made the picture jolt.)
  */
 #define BOLEX_4_3           2   /* the only format; 0 = not a Bolex build */
-#define BOLEX_FPS_X1000     24000   /* camera speed (2.8K: 23.976); the file plays at BOLEX_PLAY_FPS */
-#define BOLEX_PLAY_FPS      18      /* projection speed written in the file */
+#define BOLEX_FPS_X1000     24000   /* camera speed (1620p: 23.976); the file plays at BOLEX_PLAY_FPS */
+#define BOLEX_PLAY_FPS      24      /* projection speed written in the file */
+
+/* The speed: each take starts at BOLEX_RAMP_FROM_FPS and rises to 23.976 over BOLEX_RAMP_MS,
+ * then stays there, like a Bolex motor getting up to speed (the first frames, slower, are also
+ * longer exposed: brighter).  Live View runs at 23.976.  Timer B of the 1620p readout (Timer A
+ * 0x279: 32 MHz / 0x27A per line); 0x838 is dannephoto's 23.976. */
+#define BOLEX_RAMP_FROM_FPS 18
+#define BOLEX_RAMP_MS       2000
+#define BOLEX_1620_TIMER_A  0x279
+#define BOLEX_1620_TIMER_B  0x838
+
+/* Timer B for a frame rate (fps x1000) on the 1620p readout */
+static int bolex_timer_b_for(int fps_x1000)
+{
+    return (int)(32000000000LL / ((BOLEX_1620_TIMER_A + 1) * (int64_t) fps_x1000)) - 1;
+}
+
+/* Timer B t ms into a take: from BOLEX_RAMP_FROM_FPS up to 23.976 (Timer B 0x838), eased out
+ * (fast at first, settling at the end), then 0x838 */
+static int bolex_ramp_timer_b(int t)
+{
+    if (t >= BOLEX_RAMP_MS)
+        return BOLEX_1620_TIMER_B;
+    int b0 = bolex_timer_b_for(BOLEX_RAMP_FROM_FPS * 1000);
+    int x = MAX(t, 0) * 1000 / BOLEX_RAMP_MS;              /* 0..1000 */
+    int e = 1000 - (1000 - x) * (1000 - x) / 1000;          /* ease out */
+    return b0 + (BOLEX_1620_TIMER_B - b0) * e / 1000;
+}
+
+/* when the take being recorded started (clock ms), 0 = not recording; for the info line */
+static int bolex_rec_start = 0;
+
+/* the speed while recording (bolex_ramp_timer_b), 23.976 otherwise; the core writes it */
+static void bolex_speed_task(void)
+{
+    while (1)
+    {
+        msleep(40);
+        if (!bolex_fmt)
+            continue;
+        int now = get_ms_clock();
+        if (RECORDING)
+        {
+            if (!bolex_rec_start)
+                bolex_rec_start = now;
+            bolex_timer_b_live = bolex_ramp_timer_b(now - bolex_rec_start);
+        }
+        else
+        {
+            bolex_rec_start = 0;
+            bolex_timer_b_live = BOLEX_1620_TIMER_B;
+        }
+    }
+}
 #define BOLEX_ANGLE         133     /* Bolex H16 Reflex; the nearest Canon step gives ~131 */
 #define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 133 degrees: ~1/87 s, as 1/x * 1000 */
 
@@ -6933,7 +6997,7 @@ static void bolex_fixed_settings(void)
 
     /* the readout: dannephoto's 1x1 1620p (2160x1620, every pixel) at 23.976, slim menu in step */
     crop_preset_1x1_res_menu = 6;       /* CROP_1620p */
-    crop_preset_fps_menu = 0;           /* 23.976 (dannephoto's 1620p timers) */
+    crop_preset_fps_menu = 1;           /* 25 (no 23.976 snapping); the Bolex speed replaces it */
     slim_mode_ui = 0;                   /* 1x1 */
     slim_1x1_ar = 4;                    /* 4:3 */
     slim_unified_preset = 0;
@@ -7104,8 +7168,8 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     /* recording: the time filmed so far, in red (mlv_lite's own status is not on this screen) */
     if (RECORDING)
     {
-        int frames = mlv_lite_recorded_frames();
-        int secs = fps > 0 ? (int)((int64_t) frames * 1000 / fps) : 0;
+        /* the speed changes at the start of the take: real time since it started */
+        int secs = bolex_rec_start ? (get_ms_clock() - bolex_rec_start) / 1000 : 0;
         snprintf(buffer, 64, "REC %d:%02d   %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d",
             secs / 60, secs % 60,
             fps / 1000, fps % 1000,
@@ -8510,6 +8574,7 @@ static unsigned int crop_rec_init()
         /* Bolex: one format; everything else is fixed */
         bolex_fmt = BOLEX_4_3;
         bolex_fixed_settings();
+        task_create("bolex_speed", 0x1e, 0x1000, bolex_speed_task, 0);
         fps_override_force(0, BOLEX_FPS_X1000);    /* earlier Bolex builds saved it on */
         lvinfo_add_items(bolex_info_items, COUNT(bolex_info_items));
 
