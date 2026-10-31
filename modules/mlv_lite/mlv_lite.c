@@ -1050,9 +1050,9 @@ void update_cropping_offsets()
     }
 }
 
-/* Bolex 2.8K recorded width: the centre 4:3 of dannephoto's 1x1 2.8K (2880x1226): 1632x1224,
- * worked out from the readout height in update_resolution_params (kept here for the tests). */
-#define BOLEX_RES_X 1632
+/* Bolex 1620p recorded width: dannephoto's 1x1 1620p readout is 4:3 already (2160x1620),
+ * recorded whole; worked out from the readout height in update_resolution_params. */
+#define BOLEX_RES_X 2160
 
 static REQUIRES(settings_sem)
 void update_resolution_params()

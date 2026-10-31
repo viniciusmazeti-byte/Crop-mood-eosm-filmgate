@@ -39,7 +39,7 @@ int main(void)
     const int want = BOLEX_SHUTTER_X1000;
 
     /* filmed at 32 fps (976p readout, Bolex timers), played at 18; 360 degrees is 1/32 s */
-    /* Bolex 2.8K: filmed at 23.976 (dannephoto's 2.8K timers), played at 18 */
+    /* Bolex 1620p: filmed at 23.976 (dannephoto's 1620p timers), played at 18 */
     CHECK(BOLEX_FPS_X1000 == 24000, "Bolex camera speed %d", BOLEX_FPS_X1000);
     CHECK(BOLEX_PLAY_FPS == 18, "Bolex projection speed %d", BOLEX_PLAY_FPS);
     CHECK(BOLEX_ANGLE == 133, "Bolex shutter angle %d", BOLEX_ANGLE);
@@ -81,8 +81,8 @@ int main(void)
     }
 
     /* 976p 3x3 readout: 976 picture lines, square pixels, the centre 4:3 recorded */
-    check_43("4:3 2.8K", 1226, 0);
-    CHECK(BOLEX_RES_X == ((1226 * 4 / 3) & ~15), "width %d", BOLEX_RES_X);
+    check_43("4:3 1620p", 1620, 0);
+    CHECK(BOLEX_RES_X == ((1620 * 4 / 3) & ~15), "width %d", BOLEX_RES_X);
 
     /* the width suits the raw format (8 pixels) and the lossless encoder (16) */
     CHECK(BOLEX_RES_X % 16 == 0, "width %d is not a multiple of 16", BOLEX_RES_X);

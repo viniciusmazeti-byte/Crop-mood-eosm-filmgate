@@ -8,6 +8,7 @@ on:
       - eosm-slim-gui
       - bolex
       - bolex28k
+      - bolex1620
   workflow_dispatch:
 
 jobs:

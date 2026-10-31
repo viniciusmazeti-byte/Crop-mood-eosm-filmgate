@@ -6840,10 +6840,11 @@ static void slim_cover_hold_and_release(int hold_ms)
 
 /* ---- Bolex ---------------------------------------------------------------------------------
  * This build turns the EOS M into a Bolex: one format, everything fixed, no ML menu.
- * (Branch "bolex28k": the Bolex on dannephoto's 1x1 2.8K readout, 2880x1226 - no binning, no
- * line skipping - recorded as its centre 4:3, 1632x1224, ~7 x 5.3 mm of sensor.  2.8K cannot
- * reach 32 fps (dannephoto: 24/25; 30 gave no LCD image), so it films at 23.976 and the file
- * plays at 18 (75%).  Rolling shutter ~31 ms over the frame.  Below: the "bolex" branch notes.)
+ * (Branch "bolex1620": the Bolex on dannephoto's 1x1 1620p readout, 2160x1620 - native 4:3, no
+ * binning, no line skipping, recorded whole, ~9.3 x 7 mm of sensor (about the 16 mm gate).
+ * 1620p cannot reach 32 fps (29.97 gave no LCD image), so it films at 23.976 and the file plays
+ * at 18 (75%).  10-bit (crop_rec's analog gain): the heaviest readout for the card.  Rolling
+ * shutter ~32 ms over the frame.  Like branch "bolex28k" otherwise; below: the "bolex" notes.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -6930,23 +6931,23 @@ static void bolex_fixed_settings(void)
     if (!bolex_fmt)
         return;
 
-    /* the readout: dannephoto's 1x1 2.8K (2880x1226, every pixel) at 23.976, slim menu in step */
-    crop_preset_1x1_res_menu = 1;       /* CROP_2_8K */
-    crop_preset_fps_menu = 0;           /* 23.976 (dannephoto's 2.8K timers) */
+    /* the readout: dannephoto's 1x1 1620p (2160x1620, every pixel) at 23.976, slim menu in step */
+    crop_preset_1x1_res_menu = 6;       /* CROP_1620p */
+    crop_preset_fps_menu = 0;           /* 23.976 (dannephoto's 1620p timers) */
     slim_mode_ui = 0;                   /* 1x1 */
-    slim_1x1_ar = 1;                    /* 2.35:1 */
-    slim_unified_preset = 1;            /* Higher = 2.8K */
+    slim_1x1_ar = 4;                    /* 4:3 */
+    slim_unified_preset = 0;
     if (crop_preset_index != 1)
         crop_preset_index = 1;          /* 1x1 */
 
     /* exposure from crop_rec alone, Canon's slowest shutter = the whole frame */
     shutter_range = 1;
 
-    /* 14-bit: Canon's own depth, no analog gain trick (as in the user's crop mood setup) */
-    if (bit_depth_analog != 0)
+    /* 10-bit (crop_rec's analog gain): 1620p is the heaviest readout for the card */
+    if (bit_depth_analog != 3)
     {
-        bit_depth_analog = 0;
-        slim_bit_depth_ui = 3;
+        bit_depth_analog = 3;
+        slim_bit_depth_ui = 0;
         raw_invalidate_lv_calibration();
     }
 
@@ -7117,7 +7118,7 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
         return;
     }
 
-    snprintf(buffer, 64, "2.8K  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT%s",
+    snprintf(buffer, 64, "1620p  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  10-BIT%s",
         fps / 1000, fps % 1000,
         BOLEX_PLAY_FPS,
         exp_us > 0 ? (1000000 + exp_us / 2) / exp_us : 0,
