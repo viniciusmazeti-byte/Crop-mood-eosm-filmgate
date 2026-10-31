@@ -37,6 +37,7 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "#define BOLEX_ANGLE"
   python3 tests/extract.py $CR line     "#define BOLEX_SHUTTER_X1000"
   python3 tests/extract.py $CR line     "#define BOLEX_3X3_TIMER_A"
+  python3 tests/extract.py $CR line     "#define SENA_TIMER_A"
     python3 tests/extract.py $CR line     "#define BOLEX_RAW_SHUTTER"
   python3 tests/extract.py $CR line     "static const int sena_fps[]"
   python3 tests/extract.py $CR line     "#define SENA_HOLD_MIN_MS"

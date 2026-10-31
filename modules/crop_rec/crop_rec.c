@@ -121,6 +121,8 @@ static int bolex_fmt = 0;       /* BOLEX_4_3 (2) once crop_rec_init has run; 0 =
 /* Bolex 32 fps on dannephoto's 976p (3x3 High FPS 16:9) readout: its line time (Timer A 0x20F),
  * a longer frame: 32 MHz / (0x210 * 0x766) = 31.999 fps */
 #define BOLEX_3X3_TIMER_A   0x20F
+/* Sena 2.8K: the line time of dannephoto's 1x1 2.8K (2880x1226) readout; Timer B is the speed */
+#define SENA_TIMER_A        0x325
 #define BOLEX_3X3_TIMER_B   0x765
 /* src/fps-engio.c (Bolex core): Timer B to write live from the EVF state, 0 = none (Sena) */
 extern int bolex_timer_b_live;
@@ -1760,6 +1762,13 @@ static inline uint32_t reg_override_1X1(uint32_t reg, uint32_t old_val)
             if (Framerate_24) TimerB = 0x676;
             if (Framerate_25) TimerB = 0x633;
             if (Framerate_30) TimerB = 0x633;  // 30 Doesn't work, make it 25
+
+            /* Bolex Sena 2.8K: the speed of the moment (sena_task) */
+            if (bolex_fmt && bolex_timer_b_live)
+            {
+                TimerA    = SENA_TIMER_A;
+                TimerB    = bolex_timer_b_live;
+            }
         }
 
 
@@ -6843,7 +6852,10 @@ static void slim_cover_hold_and_release(int hold_ms)
 /* ---- Bolex: "Sena" mode -------------------------------------------------------------------
  * This build turns the EOS M into a camera for Teo Hernandez's L'Eau de la Seine (1983): the
  * camera as a gesture of the body, light turned into strokes, black as matter.  Everything
- * fixed, no ML menu.  (Branch "sena", from the "Bolex" project, branch "bolex".)
+ * fixed, no ML menu.  (Branch "sena28k": the "sena" mode on dannephoto's 1x1 2.8K readout,
+ * 2880x1226, recorded as its centre 4:3, 1632x1224 - no binning, no line skipping.  ~7 x 5.3 mm
+ * of sensor: a C-mount lens frames much tighter than on 976p; rolling shutter ~31 ms over the
+ * frame, Timer A 0x325.  "sena" itself: the 976p readout.)
  *
  * The frame rate changes by itself while recording, 4 / 6 / 8 / 12 fps drawn at random every
  * 0.5 - 2 s (sena_task), always at 360 degrees, and the file plays at 12: from real time to 3x
@@ -6889,10 +6901,10 @@ static const int sena_fps[] = { 4, 6, 8, 12 };
 #define SENA_HOLD_MIN_MS    500
 #define SENA_HOLD_MAX_MS    2000
 
-/* crop_rec Timer B (period - 1, 32 MHz / Timer A 0x210 lines) for a whole frame rate */
+/* crop_rec Timer B (period - 1, 32 MHz / (SENA_TIMER_A + 1) clocks per line) for a frame rate */
 static int sena_timer_b(int fps)
 {
-    return 32000000 / ((BOLEX_3X3_TIMER_A + 1) * fps) - 1;
+    return 32000000 / ((SENA_TIMER_A + 1) * fps) - 1;
 }
 
 /* the next random number (a plain LCG is enough to draw speeds and durations) */
@@ -6999,13 +7011,14 @@ static void bolex_fixed_settings(void)
     if (!bolex_fmt)
         return;
 
-    /* the readout: dannephoto's 976p, crop_rec 3x3 High FPS 16:9 (slim menu state in step) */
-    crop_preset_3x3_res_menu = 0;       /* High FPS */
-    crop_preset_ar_menu = 0;            /* 16:9: 1736x976 */
-    crop_preset_fps_menu = 2;           /* 30 (not 24: no 23.976 snapping); the Bolex timers replace it */
-    slim_mode_ui = 2;                   /* 3x3 */
-    if (crop_preset_index != 3)
-        crop_preset_index = 3;          /* 3x3 */
+    /* the readout: dannephoto's 1x1 2.8K (2880x1226, every pixel), slim menu state in step */
+    crop_preset_1x1_res_menu = 1;       /* CROP_2_8K */
+    crop_preset_fps_menu = 1;           /* 25 (not 24: no 23.976 snapping); the Sena timers replace it */
+    slim_mode_ui = 0;                   /* 1x1 */
+    slim_1x1_ar = 1;                    /* 2.35:1 */
+    slim_unified_preset = 1;            /* Higher = 2.8K */
+    if (crop_preset_index != 1)
+        crop_preset_index = 1;          /* 1x1 */
 
     /* exposure from crop_rec alone, Canon's slowest shutter = the whole frame */
     shutter_range = 1;
@@ -7174,7 +7187,7 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
         return;
     }
 
-    snprintf(buffer, 64, "SENA  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT%s",
+    snprintf(buffer, 64, "SENA 2.8K  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT%s",
         fps / 1000, fps % 1000,
         BOLEX_PLAY_FPS,
         exp_us > 0 ? (1000000 + exp_us / 2) / exp_us : 0,

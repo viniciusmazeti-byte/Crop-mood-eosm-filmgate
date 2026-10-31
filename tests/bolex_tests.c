@@ -44,21 +44,21 @@ int main(void)
     CHECK(BOLEX_PLAY_FPS == 12, "projection speed %d", BOLEX_PLAY_FPS);
     CHECK(BOLEX_ANGLE == 360, "shutter angle %d", BOLEX_ANGLE);
     CHECK(want == 12000, "360 degrees at 12 fps must be 1/12 s, got 1/%d.%03d", want / 1000, want % 1000);
-    CHECK(BOLEX_3X3_TIMER_A == 0x20F, "Timer A 0x%X, not 976p's line time 0x20F", BOLEX_3X3_TIMER_A);
+    CHECK(SENA_TIMER_A == 0x325, "Timer A 0x%X, not 2.8K's line time 0x325", SENA_TIMER_A);
     CHECK(SENA_HOLD_MIN_MS == 500 && SENA_HOLD_MAX_MS == 2000, "hold %d..%d ms", SENA_HOLD_MIN_MS, SENA_HOLD_MAX_MS);
     for (int i = 0; i < (int)(sizeof sena_fps / sizeof sena_fps[0]); i++)
     {
         int b = sena_timer_b(sena_fps[i]);
-        double f = 32e6 / ((BOLEX_3X3_TIMER_A + 1.0) * (b + 1.0));
+        double f = 32e6 / ((SENA_TIMER_A + 1.0) * (b + 1.0));
         printf("Sena %2d fps: Timer B %d -> %.3f fps, %.1fx faster at %d\n", sena_fps[i], b, f, BOLEX_PLAY_FPS / f, BOLEX_PLAY_FPS);
         CHECK(fabs(f - sena_fps[i]) < 0.01, "%d fps -> %.3f", sena_fps[i], f);
-        CHECK(b > 0x3ED + 100 && b <= 0xFFFF, "Timer B %d out of range (976p frame, 16 bits)", b);
+        CHECK(b > 0x4D3 + 100 && b <= 0xFFFF, "Timer B %d out of range (2.8K frame, 16 bits)", b);
         /* 360 degrees: Canon 1/30 is the whole frame at this speed */
         int us = (int)(1e6 * pow(2.0, (56 - BOLEX_RAW_SHUTTER) / 8.0));
         int fx = sena_fps[i] * 1000;
         CHECK(bolex_exposure_us(us, fx) == 1000000000 / fx, "%d fps: exposure %d us, not the whole frame", sena_fps[i], bolex_exposure_us(us, fx));
     }
-    CHECK(sena_timer_b(BOLEX_FPS_X1000 / 1000) == 5050 - 1, "12 fps Timer B %d", sena_timer_b(12));
+    CHECK(sena_timer_b(BOLEX_FPS_X1000 / 1000) == 32000000 / (806 * 12) - 1, "12 fps Timer B %d", sena_timer_b(12));
 
     /* the speed draw: never the same speed twice in a row, all speeds used, holds in range */
     {
@@ -127,9 +127,11 @@ int main(void)
         CHECK(maxrun == 4, "longest run %d, not 4", maxrun);
     }
 
-    /* 976p 3x3 readout: 976 picture lines, square pixels, the centre 4:3 recorded */
-    check_43("4:3 976p", 976, 2);
-    CHECK(BOLEX_RES_X == 1296, "width %d", BOLEX_RES_X);
+    /* 2.8K 1x1 readout: 1226 picture lines, square pixels, the centre 4:3 recorded */
+    check_43("4:3 2.8K", 1226, 0);
+    CHECK(BOLEX_RES_X == ((1226 * 4 / 3) & ~15), "width %d", BOLEX_RES_X);
+    printf("2.8K 4:3: %.1f x %.1f mm of sensor, rolling shutter %.1f ms\n", BOLEX_RES_X * 0.0043, 1224 * 0.0043,
+           1224 * (SENA_TIMER_A + 1.0) / 32e6 * 1000);
 
     /* the width suits the raw format (8 pixels) and the lossless encoder (16) */
     CHECK(BOLEX_RES_X % 16 == 0, "width %d is not a multiple of 16", BOLEX_RES_X);

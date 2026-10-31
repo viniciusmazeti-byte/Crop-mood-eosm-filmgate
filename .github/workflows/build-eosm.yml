@@ -8,6 +8,7 @@ on:
       - eosm-slim-gui
       - bolex
       - sena
+      - sena28k
   workflow_dispatch:
 
 jobs:
