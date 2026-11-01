@@ -131,9 +131,9 @@ extern int bolex_timer_b_live;
  * "breath": every BOLEX_BREATH_EVERY_MIN_MS .. MAX_MS the picture brightens or darkens by
  * BOLEX_BREATH_MIN_X1000 .. MAX_X1000 stop for BOLEX_BREATH_LEN_MIN_MS .. MAX_MS (a smooth bump).
  * Drawn at each vsync (bolex_vsync_cbr), applied in adtg_hook.  Not recording: none. */
-#define BOLEX_FLICKER_X1000         400
-#define BOLEX_BREATH_MIN_X1000      150
-#define BOLEX_BREATH_MAX_X1000      300
+#define BOLEX_FLICKER_X1000         133
+#define BOLEX_BREATH_MIN_X1000      50
+#define BOLEX_BREATH_MAX_X1000      100
 #define BOLEX_BREATH_LEN_MIN_MS     400
 #define BOLEX_BREATH_LEN_MAX_MS     700
 #define BOLEX_BREATH_EVERY_MIN_MS   1000
@@ -6958,7 +6958,9 @@ static void slim_cover_hold_and_release(int hold_ms)
  * countdown.  Before: each take started at 18 fps and rose to 23.976 in 2 s.
  * Then ("everything worked; the exposure flicker is too subtle - in the camera, not the .KEL"):
  * the exposure flickers in the camera, +-0.4 stop per frame plus a "breath" every 1-3 s
- * (bolex_flicker_step); the .KEL no longer carries an exposure.)
+ * (bolex_flicker_step); the .KEL no longer carries an exposure.
+ * Then ("too frantic and too visible, a third of it"): +-0.133 stop per frame, breaths of
+ * 0.05-0.1 stop.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
