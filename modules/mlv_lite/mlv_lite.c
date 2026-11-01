@@ -1259,7 +1259,7 @@ void update_resolution_params()
 
     /* Bolex: the mode's frame (crop_rec bolex_aspect_x100: 4:3, 1.66, 1.85) with the full height
      * of the readout, centred (square pixels): 2160x1620 (1620p), 2032x1224 / 2256x1220 (2.8K),
-     * 1296x972 (976p) */
+     * 1296x972 / 1616x974 (976p); a frame wider than the readout gets the readout's width */
     if (bolex_format())
     {
         int a = bolex_aspect_x100() ? bolex_aspect_x100() : 133;
@@ -1267,7 +1267,7 @@ void update_resolution_params()
             num = 4, den = 3;
         else
             num = a, den = 100;
-        res_x = MIN((max_res_y * num / den) & ~15, max_res_x);
+        res_x = MIN(max_res_y * num / den, max_res_x) & ~15;    /* too wide: the readout's width */
     }
 
     res_y = calc_res_y(res_x, max_res_y, num, den, squeeze_factor);

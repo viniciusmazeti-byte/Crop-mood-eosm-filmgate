@@ -239,7 +239,7 @@ int main(void)
         int max_y = m->readout == BOLEX_RO_1620 ? 1620 : m->readout == BOLEX_RO_28K ? 1226 : 976;
         int max_x = m->readout == BOLEX_RO_1620 ? 2160 : m->readout == BOLEX_RO_28K ? 2880 : 1736;
         int num = m->aspect_x100 == 133 ? 4 : m->aspect_x100, den = m->aspect_x100 == 133 ? 3 : 100;
-        int w = MIN((max_y * num / den) & ~15, max_x);
+        int w = MIN(max_y * num / den, max_x) & ~15;
         int h = calc_res_y(w, max_y, num, den, 1.0f);
         double ar = (double) w / h;
         printf("frame %s: %dx%d, %.3f:1\n", m->name, w, h, ar);

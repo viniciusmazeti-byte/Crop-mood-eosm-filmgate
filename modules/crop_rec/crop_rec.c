@@ -236,8 +236,9 @@ static int bolex_blanking(int tb, int angle, int factor_x1000)
 #define BOLEX_MODE_166      1
 #define BOLEX_MODE_185      2
 #define BOLEX_MODE_976      3
-#define BOLEX_MODE_SENA     4
-#define BOLEX_MODES         5
+#define BOLEX_MODE_976_166  4
+#define BOLEX_MODE_SENA     5
+#define BOLEX_MODES         6
 /* + the frame recorded (width : height x 100, the full height of the readout; mlv_lite) */
 struct bolex_mode { const char * name; int readout; int timer_a; int timer_b_idle; int timer_b_min; int fps_min; int fps_max; int angle; int play_fps; int sena; int aspect_x100; };
 static const struct bolex_mode bolex_modes[BOLEX_MODES] = {
@@ -245,6 +246,7 @@ static const struct bolex_mode bolex_modes[BOLEX_MODES] = {
     { "2.8K 1.66", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 166 }, /* 2032x1224 of 2880x1226; 23.99 idle, 25 its most */
     { "2.8K 1.85", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 185 }, /* 2256x1220 of 2880x1226 */
     { "976p",      BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133 }, /* 1296x972 of 1736x976 (3x3); 46.8 is its most */
+    { "976p 1.66", BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 166 }, /* 1616x974 of 1736x976 */
     { "SENA",      BOLEX_RO_28K,  0x325, 3308,  0x633,  4000, 12000, 360, 12, 1, 133 }, /* 1632x1224 of 2.8K; 12 idle; 4 / 6 / 8 / 12 */
 };
 
@@ -7011,7 +7013,8 @@ static void slim_cover_hold_and_release(int hold_ms)
  * Then ("it worked"): the flicker a third stronger (+-0.059 stop, breaths 0.023-0.044), and the
  * Sena 2.8K as a fourth mode on INFO twice, 14-bit, white balance 4500 K like the others.
  * Then: the 2.8K Bolex (4:3, 1632x1224) replaced by two, 1.66:1 (2032x1224, In Praise of Love's
- * frame) and 1.85:1 (2256x1220) - wider and with more of the readout than 4:3.  Five modes.)
+ * frame) and 1.85:1 (2256x1220) - wider and with more of the readout than 4:3.  Five modes.
+ * Then a sixth, 976p 1.66:1: 1616x974, nearly the 976p readout's whole width, after 976p 4:3.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
