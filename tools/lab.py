@@ -12,7 +12,7 @@ The Bolex / Sena builds (EOS M) write next to each clip a list with one line per
 
 The RAW keeps none of this (MLV App uses one white balance per clip), so:
 
-  1. In MLV App, develop the clip at 5500 K (the white balance the camera writes),
+  1. In MLV App, develop the clip at the white balance the camera wrote (4500 K; the .KEL says),
      everything else as you like, and export it (ProRes).
   2. Put the .KEL from the card next to the exported .mov (same name).
   3. Drag the .mov onto lab.bat  -> M31-0705_lab.mov next to it, ProRes 422 HQ.
@@ -171,10 +171,13 @@ def gains(k, base=BASE_K):
 
 
 def read_list(path):
-    """{frame: (kelvin, ev, dx, dy)} and the recorded size (w, h) or None."""
-    rows, size = {}, None
+    """[(kelvin, ev, dx, dy) per frame], the recorded size (w, h) or None, the base kelvin."""
+    rows, size, base = {}, None, BASE_K
     with open(path) as f:
         for line in f:
+            m = re.match(r'# develop the clip at (\d+) K', line)
+            if m:
+                base = int(m.group(1))
             if line.startswith('# size'):
                 w, h = line.split()[2].split('x')
                 size = (int(w), int(h))
@@ -189,7 +192,7 @@ def read_list(path):
     for i in range(last + 1):
         cur = rows.get(i, cur)
         out.append(cur)
-    return out, size
+    return out, size, base
 
 
 def shift(img, dx, dy):
@@ -240,7 +243,7 @@ def run(mov, out, force=1.0):
         return False
     print()
     print('>> ' + os.path.basename(mov) + '  (+ ' + os.path.basename(kel) + ')')
-    rows, size = read_list(kel)
+    rows, size, base = read_list(kel)
     w, h, rate = probe(mov)
     scale = (w / size[0]) if size else 1.0      # the offsets are in recorded pixels
 
@@ -258,10 +261,10 @@ def run(mov, out, force=1.0):
         if len(buf) < size_b:
             break
         k, ev, dx, dy = rows[min(i, len(rows) - 1)]
-        k, ev, dx, dy = BASE_K + (k - BASE_K) * force, ev * force, dx * force, dy * force
+        k, ev, dx, dy = base + (k - base) * force, ev * force, dx * force, dy * force
         img = np.frombuffer(buf, np.uint16).reshape(h, w, 3).astype(np.float32) / 65535
         lin = np.power(img, 2.4)                                     # Rec.709 display -> linear
-        lin *= (gains(k) * 2.0 ** ev).astype(np.float32)
+        lin *= (gains(k, base) * 2.0 ** ev).astype(np.float32)
         img = np.power(np.clip(lin, 0, 1), 1 / 2.4)
         img = shift(img, dx * scale, dy * scale)
         enc.stdin.write((np.clip(img, 0, 1) * 65535 + 0.5).astype(np.uint16).tobytes())
@@ -301,7 +304,7 @@ def main():
         if not movs:
             print()
             print('Nenhum .mov em ' + ENTRADA)
-            print('Coloque ali os .mov exportados do MLV App (revelados a 5500 K)')
+            print('Coloque ali os .mov exportados do MLV App (revelados no balanco de branco da camera)')
             print('junto com os .KEL do cartao, e abra o lab.bat de novo.')
             return
         jobs = [(p, os.path.join(RESULTADO, os.path.splitext(os.path.basename(p))[0] + '_lab.mov'))

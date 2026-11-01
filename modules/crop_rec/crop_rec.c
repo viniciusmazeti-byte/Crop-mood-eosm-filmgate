@@ -221,10 +221,21 @@ static int bolex_blanking(int tb, int factor_x1000)
     int exposure = (int)((int64_t) tb * BOLEX_ANGLE * factor_x1000 / (360 * 1000));
     return COERCE(tb - exposure, 10, tb - 2);
 }
-/* Bolex 32 fps on dannephoto's 976p (3x3 High FPS 16:9) readout: its line time (Timer A 0x20F),
- * a longer frame: 32 MHz / (0x210 * 0x766) = 31.999 fps */
-#define BOLEX_3X3_TIMER_A   0x20F
-#define BOLEX_3X3_TIMER_B   0x765
+/* Bolex modes, one after the other on INFO twice (bolex_info_pressed); 1620p at every power on.
+ * Each: dannephoto's readout and line time (Timer A), Timer B while not recording, the slowest
+ * Timer B allowed (its fastest speed), and the range the speed wanders in while recording
+ * (fps x1000).  The file always plays at 24 (BOLEX_PLAY_FPS): 976p is slow motion. */
+#define BOLEX_MODE_1620     0
+#define BOLEX_MODE_28K      1
+#define BOLEX_MODE_976      2
+#define BOLEX_MODES         3
+struct bolex_mode { const char * name; int timer_a; int timer_b_idle; int timer_b_min; int fps_min; int fps_max; };
+static const struct bolex_mode bolex_modes[BOLEX_MODES] = {
+    { "1620p", 0x279, 0x838, 0x7E2, 20000, 25000 },     /* 2160x1620; 23.976 idle, 25 the most the LCD shows */
+    { "2.8K",  0x325, 0x676, 0x633, 20000, 25000 },     /* 1632x1224 of 2880x1226; 23.99 idle, 25 its most */
+    { "976p",  0x20F, 0x50E, 0x50E, 42000, 46800 },     /* 1296x972 of 1736x976 (3x3); 46.8 is its most */
+};
+static int bolex_mode = BOLEX_MODE_1620;    /* not saved: 1620p at every power on */
 
 
 /* customized buttons variables
@@ -1868,6 +1879,10 @@ static inline uint32_t reg_override_1X1(uint32_t reg, uint32_t old_val)
             if (Framerate_24) TimerB = 0x676;
             if (Framerate_25) TimerB = 0x633;
             if (Framerate_30) TimerB = 0x633;  // 30 Doesn't work, make it 25
+
+            /* Bolex 2.8K: the speed of the moment (bolex_speed_task) */
+            if (bolex_fmt && bolex_mode == BOLEX_MODE_28K && bolex_timer_b_live)
+                TimerB = bolex_timer_b_live;
         }
 
 
@@ -1962,7 +1977,7 @@ static inline uint32_t reg_override_1X1(uint32_t reg, uint32_t old_val)
             if (Framerate_25) TimerB = 0x7E2;
 
             /* Bolex 1620p: the speed of the moment (bolex_speed_task) */
-            if (bolex_fmt && bolex_timer_b_live)
+            if (bolex_fmt && bolex_mode == BOLEX_MODE_1620 && bolex_timer_b_live)
                 TimerB = bolex_timer_b_live;
         }
 
@@ -2595,12 +2610,9 @@ static inline uint32_t reg_override_3X3(uint32_t reg, uint32_t old_val)
                 YUV_HD_S_V    = 0x1050165;
             }
 
-            /* Bolex: 32 fps on this 976p readout (see BOLEX_3X3_TIMER_A) */
-            if (bolex_fmt && is_EOSM)
-            {
-                TimerA        = BOLEX_3X3_TIMER_A;
-                TimerB        = BOLEX_3X3_TIMER_B;
-            }
+            /* Bolex 976p: dannephoto's 46.8 fps line time, the speed of the moment (bolex_speed_task) */
+            if (bolex_fmt && is_EOSM && bolex_mode == BOLEX_MODE_976 && bolex_timer_b_live)
+                TimerB        = bolex_timer_b_live;
         }
         
         if (AR_2_1)
@@ -6974,6 +6986,11 @@ static void slim_cover_hold_and_release(int hold_ms)
  * 0.05-0.1 stop.
  * Then ("still too frantic and strong: a third of the frenzy and the strength"): +-0.044 stop,
  * a new value every 3 frames (eased), breaths of 0.017-0.033 stop every 3-9 s.)
+ * (Branch "bolex3": three Bolexes in one, INFO twice goes to the next (bolex_modes): 1620p (at
+ * every power on), 2.8K (1632x1224 of the 1x1 2.8K readout, 20-25 fps) and 976p (1296x972 of
+ * the 3x3 976p readout, 42-46.8 fps, played at 24: slow motion).  Everything else the same in
+ * all three: 14-bit, 133 degrees, the flicker, drops, .KEL, the cuts.  No blue filter; white
+ * balance 4500 K.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -7004,29 +7021,22 @@ static void slim_cover_hold_and_release(int hold_ms)
 #define BOLEX_FPS_X1000     24000   /* camera speed (1620p: 23.976); the file plays at BOLEX_PLAY_FPS */
 #define BOLEX_PLAY_FPS      24      /* projection speed written in the file */
 
-/* The speed: while recording it wanders, smoothly, between BOLEX_FPS_MIN and BOLEX_FPS_MAX (x1000)
- * for the whole take, like a spring motor losing and gaining a little: a new random target
- * every BOLEX_WANDER_HOLD_MIN_MS .. MAX_MS, followed through two smoothing stages of
- * BOLEX_WANDER_TAU_MS (no jumps, no corners).  Not recording: 23.976.  25 is the most the
- * 1620p readout shows on the LCD.  Timer B of the 1620p readout (Timer A 0x279: 32 MHz / 0x27A
- * per line); 0x838 is dannephoto's 23.976, 0x7E2 its 25. */
-#define BOLEX_FPS_MIN_X1000      20000
-#define BOLEX_FPS_MAX_X1000      25000
+/* The speed: while recording it wanders, smoothly, within the mode's range (bolex_modes) for the
+ * whole take, like a spring motor losing and gaining a little: a new random target every
+ * BOLEX_WANDER_HOLD_MIN_MS .. MAX_MS, followed through two smoothing stages of
+ * BOLEX_WANDER_TAU_MS (no jumps, no corners).  Not recording: the mode's idle Timer B. */
 #define BOLEX_WANDER_HOLD_MIN_MS 800
 #define BOLEX_WANDER_HOLD_MAX_MS 3000
 #define BOLEX_WANDER_TAU_MS      700
-#define BOLEX_1620_TIMER_A  0x279
-#define BOLEX_1620_TIMER_B  0x838
 
-/* Timer B for a frame rate (fps x1000) on the 1620p readout, rounded (25000 -> 0x7E2), never
- * shorter than dannephoto's 25 fps */
-static int bolex_timer_b_for(int fps_x1000)
+/* Timer B for a frame rate (fps x1000) in a mode, rounded, never past the mode's fastest */
+static int bolex_timer_b_for(const struct bolex_mode * m, int fps_x1000)
 {
-    int64_t line = (BOLEX_1620_TIMER_A + 1) * (int64_t) fps_x1000;
-    return MAX((int)((32000000000LL + line / 2) / line) - 1, 0x7E2);
+    int64_t line = (m->timer_a + 1) * (int64_t) fps_x1000;
+    return MAX((int)((32000000000LL + line / 2) / line) - 1, m->timer_b_min);
 }
 
-/* the wandering speed: state, random numbers (xorshift), one step of dt ms -> fps x1000 */
+/* the wandering speed: state, one step of dt ms -> fps x1000 */
 struct bolex_wander { uint32_t seed; int target; int a; int b; int hold_ms; };
 
 static void bolex_wander_start(struct bolex_wander * w, uint32_t seed, int fps_x1000)
@@ -7036,23 +7046,38 @@ static void bolex_wander_start(struct bolex_wander * w, uint32_t seed, int fps_x
     w->hold_ms = 0;
 }
 
-static int bolex_wander_step(struct bolex_wander * w, int dt)
+static int bolex_wander_step(struct bolex_wander * w, int dt, int fps_min, int fps_max)
 {
     w->hold_ms -= dt;
     if (w->hold_ms <= 0)
     {
-        w->target = BOLEX_FPS_MIN_X1000 + (int)(bolex_rand(&w->seed) % (BOLEX_FPS_MAX_X1000 - BOLEX_FPS_MIN_X1000 + 1));
+        w->target = fps_min + (int)(bolex_rand(&w->seed) % (uint32_t)(fps_max - fps_min + 1));
         w->hold_ms = BOLEX_WANDER_HOLD_MIN_MS + (int)(bolex_rand(&w->seed) % (BOLEX_WANDER_HOLD_MAX_MS - BOLEX_WANDER_HOLD_MIN_MS + 1));
     }
     w->a += (w->target - w->a) * dt / BOLEX_WANDER_TAU_MS;
     w->b += (w->a - w->b) * dt / BOLEX_WANDER_TAU_MS;
-    return COERCE(w->b, BOLEX_FPS_MIN_X1000, BOLEX_FPS_MAX_X1000);
+    return COERCE(w->b, fps_min, fps_max);
+}
+
+/* the readout Live View runs now is the one of bolex_mode (not half way through a switch) */
+static int bolex_mode_active(void)
+{
+    if (!patch_active)
+        return 0;
+    switch (bolex_mode)
+    {
+        case BOLEX_MODE_1620: return crop_preset == CROP_PRESET_1X1 && CROP_1620p;
+        case BOLEX_MODE_28K:  return crop_preset == CROP_PRESET_1X1 && CROP_2_8K;
+        case BOLEX_MODE_976:  return crop_preset == CROP_PRESET_3X3 && High_FPS && AR_16_9;
+    }
+    return 0;
 }
 
 /* when the take being recorded started (clock ms), 0 = not recording; for the info line */
 static int bolex_rec_start = 0;
 
-/* the speed while recording (bolex_wander_step), 23.976 otherwise; the core writes it */
+/* the speed while recording (bolex_wander_step), the mode's idle speed otherwise, nothing while
+ * a mode switch is under way (0: the core leaves Timer B alone); the core writes it */
 static void bolex_speed_task(void)
 {
     static struct bolex_wander w;
@@ -7070,14 +7095,18 @@ static void bolex_speed_task(void)
             if (!bolex_rec_start)
             {
                 bolex_rec_start = now;
-                bolex_wander_start(&w, (uint32_t) now * 2654435761u, 23976);
+                const struct bolex_mode * m0 = &bolex_modes[bolex_mode];
+                bolex_wander_start(&w, (uint32_t) now * 2654435761u,
+                    (int)(32000000000LL / ((m0->timer_a + 1) * (int64_t)(m0->timer_b_idle + 1))));
             }
-            bolex_timer_b_live = bolex_timer_b_for(bolex_wander_step(&w, dt));
+            const struct bolex_mode * m = &bolex_modes[bolex_mode];
+            if (bolex_mode_active())
+                bolex_timer_b_live = bolex_timer_b_for(m, bolex_wander_step(&w, dt, m->fps_min, m->fps_max));
         }
         else
         {
             bolex_rec_start = 0;
-            bolex_timer_b_live = BOLEX_1620_TIMER_B;
+            bolex_timer_b_live = bolex_mode_active() ? bolex_modes[bolex_mode].timer_b_idle : 0;
         }
     }
 }
@@ -7152,14 +7181,28 @@ static void bolex_fixed_settings(void)
     if (!bolex_fmt)
         return;
 
-    /* the readout: dannephoto's 1x1 1620p (2160x1620, every pixel) at 23.976, slim menu in step */
-    crop_preset_1x1_res_menu = 6;       /* CROP_1620p */
-    crop_preset_fps_menu = 1;           /* 25 (no 23.976 snapping); the Bolex speed replaces it */
-    slim_mode_ui = 0;                   /* 1x1 */
-    slim_1x1_ar = 4;                    /* 4:3 */
-    slim_unified_preset = 0;
-    if (crop_preset_index != 1)
-        crop_preset_index = 1;          /* 1x1 */
+    /* the readout of the mode, slim menu in step */
+    if (bolex_mode == BOLEX_MODE_976)
+    {
+        /* dannephoto's 976p: 3x3 High FPS 16:9, 1736x976 */
+        crop_preset_3x3_res_menu = 0;   /* High FPS */
+        crop_preset_ar_menu = 0;        /* 16:9 */
+        crop_preset_fps_menu = 2;       /* 30 (no 23.976 snapping); the Bolex speed replaces it */
+        slim_mode_ui = 2;               /* 3x3 */
+        if (crop_preset_index != 3)
+            crop_preset_index = 3;      /* 3x3 */
+    }
+    else
+    {
+        /* dannephoto's 1x1 1620p (2160x1620) or 2.8K (2880x1226), every pixel */
+        crop_preset_1x1_res_menu = bolex_mode == BOLEX_MODE_28K ? 1 : 6;   /* CROP_2_8K / CROP_1620p */
+        crop_preset_fps_menu = 1;       /* 25 (no 23.976 snapping); the Bolex speed replaces it */
+        slim_mode_ui = 0;               /* 1x1 */
+        slim_1x1_ar = bolex_mode == BOLEX_MODE_28K ? 1 : 4;               /* 2.35:1 / 4:3 */
+        slim_unified_preset = bolex_mode == BOLEX_MODE_28K ? 1 : 0;
+        if (crop_preset_index != 1)
+            crop_preset_index = 1;      /* 1x1 */
+    }
 
     /* exposure from crop_rec alone, Canon's slowest shutter = the whole frame */
     shutter_range = 1;
@@ -7195,9 +7238,7 @@ static int bolex_canon_mode_ok(void)
 /* White balance written in the file (MLV WBAL block; MLV App opens with it): daylight, or the
  * "blue filter" - a cold white balance, so a daylight scene comes out deep blue.  The RAW data
  * itself is the same either way (it is the sensor's); only the white balance changes. */
-#define BOLEX_WB_NORMAL     5500    /* as in the user's crop mood setup */
-#define BOLEX_WB_BLUE       2800
-static int bolex_blue = 0;
+#define BOLEX_WB            4500    /* the white balance of every take (the .KEL's base too) */
 
 /* INFO twice (within half a second): the blue filter on / off */
 static void bolex_info_pressed(void)
@@ -7207,9 +7248,11 @@ static void bolex_info_pressed(void)
     if (last && now - last < 500)
     {
         last = 0;
-        bolex_blue = !bolex_blue;
-        lens_set_kelvin(bolex_blue ? BOLEX_WB_BLUE : BOLEX_WB_NORMAL);
-        NotifyBox(1500, bolex_blue ? "Filtro azul" : "Sem filtro");
+        bolex_mode = (bolex_mode + 1) % BOLEX_MODES;
+        bolex_timer_b_live = 0;         /* the core leaves Timer B alone until the new readout runs */
+        bolex_fixed_settings();
+        eosm_lv_guard_request();        /* rebuild Live View: crop_rec applies the new readout */
+        NotifyBox(2000, "BOLEX %s", bolex_modes[bolex_mode].name);
         return;
     }
     last = now;
@@ -7282,10 +7325,9 @@ static void bolex_step(void)
     if (lens_info.raw_iso != bolex_isos[iso_index])
         lens_set_rawiso(bolex_isos[iso_index]);
 
-    /* white balance: daylight, or the blue filter (INFO twice) */
-    int kelvin = bolex_blue ? BOLEX_WB_BLUE : BOLEX_WB_NORMAL;
-    if (lens_info.wb_mode != WB_KELVIN || (int) lens_info.kelvin != kelvin)
-        lens_set_kelvin(kelvin);
+    /* white balance: fixed */
+    if (lens_info.wb_mode != WB_KELVIN || (int) lens_info.kelvin != BOLEX_WB)
+        lens_set_kelvin(BOLEX_WB);
 }
 
 /* the one line at the bottom of the screen (test builds: the settings, to check them) */
@@ -7328,8 +7370,9 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     {
         /* the speed changes all through the take: real time since it started */
         int secs = bolex_rec_start ? (get_ms_clock() - bolex_rec_start) / 1000 : 0;
-        snprintf(buffer, 64, "REC %d:%02d   %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d",
+        snprintf(buffer, 64, "REC %d:%02d  %s  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d",
             secs / 60, secs % 60,
+            bolex_modes[bolex_mode].name,
             fps / 1000, fps % 1000,
             BOLEX_PLAY_FPS,
             exp_us > 0 ? (1000000 + exp_us / 2) / exp_us : 0,
@@ -7340,15 +7383,21 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
         return;
     }
 
-    snprintf(buffer, 64, "1620p  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT%s",
+    /* a mode switch under way (INFO twice): say which */
+    if (!bolex_mode_active())
+    {
+        snprintf(buffer, 64, "BOLEX %s ...", bolex_modes[bolex_mode].name);
+        item->color_fg = COLOR_YELLOW;
+        return;
+    }
+
+    snprintf(buffer, 64, "%s  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT",
+        bolex_modes[bolex_mode].name,
         fps / 1000, fps % 1000,
         BOLEX_PLAY_FPS,
         exp_us > 0 ? (1000000 + exp_us / 2) / exp_us : 0,
         angle,
-        lens_info.iso,
-        bolex_blue ? "  AZUL" : "");
-    if (bolex_blue)
-        item->color_fg = COLOR_CYAN;
+        lens_info.iso);
 }
 
 static struct lvinfo_item bolex_info_items[] = {

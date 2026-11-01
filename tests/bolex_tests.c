@@ -40,49 +40,69 @@ int main(void)
 {
     const int want = BOLEX_SHUTTER_X1000;
 
-    /* Bolex 1620p: filmed at 20..25 fps (dannephoto's 1620p line time), played at 24, 133 degrees */
+    /* Bolex: 1620p / 2.8K at 20..25 fps, 976p at 42..46.8, all played at 24, 133 degrees */
     CHECK(BOLEX_FPS_X1000 == 24000, "Bolex camera speed %d", BOLEX_FPS_X1000);
     CHECK(BOLEX_ANGLE == 133, "Bolex shutter angle %d", BOLEX_ANGLE);
     CHECK(want > 64000 && want < 66000, "133 degrees at 24 fps must be ~1/65 s, got 1/%d.%03d", want / 1000, want % 1000);
 
-    /* the speed: wandering between 20 and 25 fps all through a take, smooth, using the range;
-     * the file plays at 24 */
-    CHECK(BOLEX_PLAY_FPS == 24, "projection speed %d", BOLEX_PLAY_FPS);
-    CHECK(bolex_timer_b_for(25000) == 0x7E2 && bolex_timer_b_for(23976) == BOLEX_1620_TIMER_B, "timers %x %x",
-          bolex_timer_b_for(25000), bolex_timer_b_for(23976));
+    /* the three modes: dannephoto's timers; idle and fastest speeds */
     {
+        const struct bolex_mode * m = bolex_modes;
+        CHECK(m[BOLEX_MODE_1620].timer_a == 0x279 && m[BOLEX_MODE_28K].timer_a == 0x325 && m[BOLEX_MODE_976].timer_a == 0x20F, "timer A");
+        for (int i = 0; i < BOLEX_MODES; i++)
+        {
+            double idle = 32e6 / ((m[i].timer_a + 1.0) * (m[i].timer_b_idle + 1.0));
+            double top  = 32e6 / ((m[i].timer_a + 1.0) * (m[i].timer_b_min + 1.0));
+            printf("mode %s: idle %.3f fps, fastest %.3f, wanders %d..%d\n", m[i].name, idle, top, m[i].fps_min, m[i].fps_max);
+            CHECK(fabs(top * 1000 - m[i].fps_max) < 30, "%s: fastest %.3f vs %d", m[i].name, top, m[i].fps_max);
+            CHECK(bolex_timer_b_for(&m[i], m[i].fps_max) == m[i].timer_b_min, "%s: B at max", m[i].name);
+            CHECK(bolex_timer_b_for(&m[i], m[i].fps_max + 5000) == m[i].timer_b_min, "%s: never faster", m[i].name);
+        }
+        CHECK(bolex_timer_b_for(&m[BOLEX_MODE_1620], 23976) == 0x838, "1620p 23.976");
+        CHECK(m[BOLEX_MODE_976].fps_min == 42000 && m[BOLEX_MODE_976].fps_max == 46800, "976p range");
+    }
+
+    /* the speed: wandering within each mode's range all through a take, smooth, using the
+     * range; the file plays at 24 */
+    CHECK(BOLEX_PLAY_FPS == 24, "projection speed %d", BOLEX_PLAY_FPS);
+    for (int mi = 0; mi < BOLEX_MODES; mi++)
+    {
+        const struct bolex_mode * m = &bolex_modes[mi];
+        int span = m->fps_max - m->fps_min;
         struct bolex_wander w;
-        int lo = 99999, hi = 0, maxstep = 0, below21 = 0, above24 = 0, n = 0;
+        int lo = 999999, hi = 0, maxstep = 0, low = 0, high = 0, n = 0;
         for (int take = 0; take < 50; take++)
         {
-            bolex_wander_start(&w, 1234567u * (take + 1), 23976);
-            int prev = 23976;
+            int start = (m->fps_min + m->fps_max) / 2;
+            bolex_wander_start(&w, 1234567u * (take + 1), start);
+            int prev = start;
             for (int t = 0; t < 60000; t += 40, n++)       /* a minute, the task's 40 ms */
             {
-                int f = bolex_wander_step(&w, 40);
-                CHECK(f >= BOLEX_FPS_MIN_X1000 && f <= BOLEX_FPS_MAX_X1000, "speed %d", f);
+                int f = bolex_wander_step(&w, 40, m->fps_min, m->fps_max);
+                CHECK(f >= m->fps_min && f <= m->fps_max, "%s speed %d", m->name, f);
                 maxstep = MAX(maxstep, ABS(f - prev));
                 prev = f;
                 lo = f < lo ? f : lo; hi = f > hi ? f : hi;
-                below21 += f < 21000; above24 += f > 24000;
-                int b = bolex_timer_b_for(f);
-                CHECK(b >= 0x7E2 && b <= bolex_timer_b_for(20000), "timer B %x", b);
+                low += f < m->fps_min + span / 5; high += f > m->fps_max - span / 5;
+                int b = bolex_timer_b_for(m, f);
+                CHECK(b >= m->timer_b_min && b <= bolex_timer_b_for(m, m->fps_min), "%s timer B %x", m->name, b);
             }
         }
-        printf("speed: %d..%d fps x1000, largest change per 40 ms %d, %d%% below 21, %d%% above 24\n",
-               lo, hi, maxstep, below21 * 100 / n, above24 * 100 / n);
-        CHECK(lo < 21000 && hi > 24500, "range used %d..%d", lo, hi);
-        CHECK(maxstep <= 150, "a jump of %d", maxstep);
-        CHECK(below21 * 100 / n >= 5 && above24 * 100 / n >= 5, "range rarely reached");
+        printf("%s speed: %d..%d fps x1000, largest change per 40 ms %d, %d%% in the low fifth, %d%% in the high\n",
+               m->name, lo, hi, maxstep, low * 100 / n, high * 100 / n);
+        CHECK(lo < m->fps_min + span / 5 && hi > m->fps_max - span / 10, "%s range used %d..%d", m->name, lo, hi);
+        CHECK(maxstep <= 150, "%s: a jump of %d", m->name, maxstep);
+        CHECK(low * 100 / n >= 5 && high * 100 / n >= 5, "%s: range rarely reached", m->name);
     }
 
     /* the shutter: 133 degrees at every speed of the range (the blanking for the Timer B) */
-    for (int f = BOLEX_FPS_MIN_X1000; f <= BOLEX_FPS_MAX_X1000; f += 100)
-    {
-        int tb = bolex_timer_b_for(f) + 1;
-        double angle = 360.0 * (tb - bolex_blanking(tb, 1000)) / tb;
-        CHECK(fabs(angle - BOLEX_ANGLE) < 0.3, "%d fps x1000: %.2f degrees", f, angle);
-    }
+    for (int mi = 0; mi < BOLEX_MODES; mi++)
+        for (int f = bolex_modes[mi].fps_min; f <= bolex_modes[mi].fps_max; f += 100)
+        {
+            int tb = bolex_timer_b_for(&bolex_modes[mi], f) + 1;
+            double angle = 360.0 * (tb - bolex_blanking(tb, 1000)) / tb;
+            CHECK(fabs(angle - BOLEX_ANGLE) < 0.3, "%s %d fps x1000: %.2f degrees", bolex_modes[mi].name, f, angle);
+        }
 
     /* 2^ev */
     for (int ev = -1000; ev <= 1000; ev += 10)
@@ -108,7 +128,7 @@ int main(void)
             breaths += in && !was; was = in;
             big_steps += n && ABS(ev - prev) > 40; prev = ev;
             CHECK(ABS(ev) <= BOLEX_FLICKER_X1000 + BOLEX_BREATH_MAX_X1000, "ev %d", ev);
-            int tb = bolex_timer_b_for(20000) + 1;
+            int tb = bolex_timer_b_for(&bolex_modes[BOLEX_MODE_976], 46800) + 1;   /* the shortest frame */
             int ang = 360 * (tb - bolex_blanking(tb, bolex_pow2_x1000(ev))) / tb;
             alo = ang < alo ? ang : alo; ahi = ang > ahi ? ang : ahi;
             CHECK(ang > 60 && ang < 360, "angle %d", ang);
@@ -119,12 +139,8 @@ int main(void)
         CHECK(breaths > 600 / 9 && breaths < 600 / 3, "breaths %d", breaths);
         CHECK(ABS(sum / n) < 10, "flicker not centred: %ld", sum / n);
     }
-    {
-        int t20 = bolex_timer_b_for(20000) + 1, t25 = bolex_timer_b_for(25000) + 1;
-        printf("shutter: 20 fps 1/%.0f s, 25 fps 1/%.0f s (both %d degrees)\n",
-               360.0 * 20 / BOLEX_ANGLE, 360.0 * 25 / BOLEX_ANGLE, BOLEX_ANGLE);
-        (void) t20; (void) t25;
-    }
+    printf("shutter: 20 fps 1/%.0f s, 25 fps 1/%.0f s, 46.8 fps 1/%.0f s (all %d degrees)\n",
+           360.0 * 20 / BOLEX_ANGLE, 360.0 * 25 / BOLEX_ANGLE, 360.0 * 46.8 / BOLEX_ANGLE, BOLEX_ANGLE);
 
     /* the cut at the end: by time (the speed wanders), here 1 s of 40 ms frames is 25 */
     {

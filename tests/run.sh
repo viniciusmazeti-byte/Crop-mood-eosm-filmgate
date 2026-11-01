@@ -51,13 +51,15 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR function bolex_flicker_start
   python3 tests/extract.py $CR function bolex_flicker_step
   python3 tests/extract.py $CR function bolex_blanking
-  python3 tests/extract.py $CR line     "#define BOLEX_FPS_MIN_X1000"
-  python3 tests/extract.py $CR line     "#define BOLEX_FPS_MAX_X1000"
+  python3 tests/extract.py $CR line     "#define BOLEX_MODE_1620"
+  python3 tests/extract.py $CR line     "#define BOLEX_MODE_28K"
+  python3 tests/extract.py $CR line     "#define BOLEX_MODE_976"
+  python3 tests/extract.py $CR line     "#define BOLEX_MODES"
+  python3 tests/extract.py $CR line     "struct bolex_mode {"
+  python3 tests/extract.py $CR block    "static const struct bolex_mode bolex_modes[BOLEX_MODES]"
   python3 tests/extract.py $CR line     "#define BOLEX_WANDER_HOLD_MIN_MS"
   python3 tests/extract.py $CR line     "#define BOLEX_WANDER_HOLD_MAX_MS"
   python3 tests/extract.py $CR line     "#define BOLEX_WANDER_TAU_MS"
-  python3 tests/extract.py $CR line     "#define BOLEX_1620_TIMER_A"
-  python3 tests/extract.py $CR line     "#define BOLEX_1620_TIMER_B"
   python3 tests/extract.py $CR function bolex_timer_b_for
   python3 tests/extract.py $CR line     "struct bolex_wander {"
   python3 tests/extract.py $CR function bolex_wander_start

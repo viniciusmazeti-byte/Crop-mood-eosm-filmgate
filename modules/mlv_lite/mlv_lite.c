@@ -529,7 +529,7 @@ static int bolex_trim_file(const char * name, int n)
  *   kelvin  BOLEX_KELVIN_BASE +- BOLEX_KELVIN_JITTER, a new value every frame
  *   ev      +- BOLEX_EV_JITTER_X1000 / 1000 stop every frame (flicker)
  *   dx, dy  pixels; a slow wander plus a small jump each frame, more vertical (the pull-down) */
-#define BOLEX_KELVIN_BASE       5500
+#define BOLEX_KELVIN_BASE       4500    /* the camera's white balance (crop_rec BOLEX_WB) */
 #define BOLEX_KELVIN_JITTER     250
 #define BOLEX_EV_JITTER_X1000   0       /* the flicker is now in the camera (crop_rec), not here */
 #define BOLEX_WEAVE_X_X100      150     /* +- 1.5 px of 2160 */
