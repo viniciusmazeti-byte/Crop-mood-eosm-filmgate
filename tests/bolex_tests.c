@@ -51,6 +51,8 @@ int main(void)
         CHECK(m[BOLEX_MODE_1620].timer_a == 0x279 && m[BOLEX_MODE_28K].timer_a == 0x325 && m[BOLEX_MODE_976].timer_a == 0x20F, "timer A");
         for (int i = 0; i < BOLEX_MODES; i++)
         {
+            if (m[i].sena)
+                continue;
             double idle = 32e6 / ((m[i].timer_a + 1.0) * (m[i].timer_b_idle + 1.0));
             double top  = 32e6 / ((m[i].timer_a + 1.0) * (m[i].timer_b_min + 1.0));
             printf("mode %s: idle %.3f fps, fastest %.3f, wanders %d..%d\n", m[i].name, idle, top, m[i].fps_min, m[i].fps_max);
@@ -68,6 +70,8 @@ int main(void)
     for (int mi = 0; mi < BOLEX_MODES; mi++)
     {
         const struct bolex_mode * m = &bolex_modes[mi];
+        if (m->sena)
+            continue;
         int span = m->fps_max - m->fps_min;
         struct bolex_wander w;
         int lo = 999999, hi = 0, maxstep = 0, low = 0, high = 0, n = 0;
@@ -100,8 +104,8 @@ int main(void)
         for (int f = bolex_modes[mi].fps_min; f <= bolex_modes[mi].fps_max; f += 100)
         {
             int tb = bolex_timer_b_for(&bolex_modes[mi], f) + 1;
-            double angle = 360.0 * (tb - bolex_blanking(tb, 1000)) / tb;
-            CHECK(fabs(angle - BOLEX_ANGLE) < 0.3, "%s %d fps x1000: %.2f degrees", bolex_modes[mi].name, f, angle);
+            double angle = 360.0 * (tb - bolex_blanking(tb, bolex_modes[mi].angle, 1000)) / tb;
+            CHECK(fabs(angle - bolex_modes[mi].angle) < 1.5, "%s %d fps x1000: %.2f degrees", bolex_modes[mi].name, f, angle);
         }
 
     /* 2^ev */
@@ -111,7 +115,7 @@ int main(void)
         CHECK(fabs(bolex_pow2_x1000(ev) - want) < 1.5, "2^%d: %d, want %.1f", ev, bolex_pow2_x1000(ev), want);
     }
 
-    /* the flicker in the camera: within +-0.044 stop, eased over 3 frames, breaths of 0.017..0.033 stop every
+    /* the flicker in the camera: within +-0.059 stop, eased over 3 frames, breaths of 0.023..0.044 stop every
      * 1..3 s; the angle it gives stays inside the frame */
     {
         struct bolex_flicker fl;
@@ -129,7 +133,7 @@ int main(void)
             big_steps += n && ABS(ev - prev) > 40; prev = ev;
             CHECK(ABS(ev) <= BOLEX_FLICKER_X1000 + BOLEX_BREATH_MAX_X1000, "ev %d", ev);
             int tb = bolex_timer_b_for(&bolex_modes[BOLEX_MODE_976], 46800) + 1;   /* the shortest frame */
-            int ang = 360 * (tb - bolex_blanking(tb, bolex_pow2_x1000(ev))) / tb;
+            int ang = 360 * (tb - bolex_blanking(tb, BOLEX_ANGLE, bolex_pow2_x1000(ev))) / tb;
             alo = ang < alo ? ang : alo; ahi = ang > ahi ? ang : ahi;
             CHECK(ang > 60 && ang < 360, "angle %d", ang);
         }
@@ -141,6 +145,37 @@ int main(void)
     }
     printf("shutter: 20 fps 1/%.0f s, 25 fps 1/%.0f s, 46.8 fps 1/%.0f s (all %d degrees)\n",
            360.0 * 20 / BOLEX_ANGLE, 360.0 * 25 / BOLEX_ANGLE, 360.0 * 46.8 / BOLEX_ANGLE, BOLEX_ANGLE);
+
+    /* the Sena: on the 2.8K line time, 4 / 6 / 8 / 12 fps (Timer B fits the register), 360 degrees,
+     * played at 12; the next speed never the same, all used; ~2 in 5 frames dropped, at most 4 in
+     * a row; colour temperatures 2000..6000 K */
+    {
+        const struct bolex_mode * m = &bolex_modes[BOLEX_MODE_SENA];
+        CHECK(m->sena && m->timer_a == 0x325 && m->angle == 360 && m->play_fps == 12, "Sena mode");
+        CHECK(bolex_modes[BOLEX_MODE_28K].timer_a == m->timer_a, "Sena on the 2.8K line time");
+        for (int i = 0; i < (int) COUNT(sena_fps); i++)
+        {
+            int b = bolex_timer_b_for(m, sena_fps[i] * 1000);
+            double f = 32e6 / ((m->timer_a + 1.0) * (b + 1.0));
+            CHECK(fabs(f - sena_fps[i]) < 0.01 && b < 0xFFFF, "Sena %d fps: B %d, %.3f", sena_fps[i], b, f);
+        }
+        CHECK(bolex_timer_b_for(m, 12000) == m->timer_b_idle, "Sena idle %d", bolex_timer_b_for(m, 12000));
+        uint32_t seed = 7; int cur = -1, used[4] = {0}, same = 0;
+        for (int k = 0; k < 10000; k++) { int n = sena_next(&seed, cur); same |= n == cur; used[n]++; cur = n; }
+        CHECK(!same && used[0] && used[1] && used[2] && used[3], "Sena speeds");
+        int left = 0, dropped = 0, run = 0, maxrun = 0;
+        seed = 11;
+        for (int f = 0; f < 100000; f++)
+        {
+            int d = sena_drop_frame(&seed, &left);
+            dropped += d; run = d ? run + 1 : 0; maxrun = MAX(maxrun, run);
+        }
+        printf("Sena: drops %.1f%%, at most %d in a row\n", dropped / 1000.0, maxrun);
+        CHECK(dropped > 37000 && dropped < 43000 && maxrun <= 4, "Sena drops %d, run %d", dropped, maxrun);
+        int klo = 99999, khi = 0;
+        for (int f = 0; f < 20000; f++) { int k = sena_kelvin(99, f); klo = k < klo ? k : klo; khi = k > khi ? k : khi; }
+        CHECK(klo >= SENA_KELVIN_MIN && khi <= SENA_KELVIN_MAX && klo < 2100 && khi > 5900, "Sena kelvin %d..%d", klo, khi);
+    }
 
     /* the cut at the end: by time (the speed wanders), here 1 s of 40 ms frames is 25 */
     {

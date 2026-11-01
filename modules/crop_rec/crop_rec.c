@@ -132,10 +132,10 @@ extern int bolex_timer_b_live;
  * "breath": every BOLEX_BREATH_EVERY_MIN_MS .. MAX_MS the picture brightens or darkens by
  * BOLEX_BREATH_MIN_X1000 .. MAX_X1000 stop for BOLEX_BREATH_LEN_MIN_MS .. MAX_MS (a smooth bump).
  * Drawn at each vsync (bolex_vsync_cbr), applied in adtg_hook.  Not recording: none. */
-#define BOLEX_FLICKER_X1000         44
+#define BOLEX_FLICKER_X1000         59
 #define BOLEX_FLICKER_EVERY         3       /* frames between new values, eased between them */
-#define BOLEX_BREATH_MIN_X1000      17
-#define BOLEX_BREATH_MAX_X1000      33
+#define BOLEX_BREATH_MIN_X1000      23
+#define BOLEX_BREATH_MAX_X1000      44
 #define BOLEX_BREATH_LEN_MIN_MS     400
 #define BOLEX_BREATH_LEN_MAX_MS     700
 #define BOLEX_BREATH_EVERY_MIN_MS   3000
@@ -214,27 +214,38 @@ static int bolex_flicker_step(struct bolex_flicker * f, int dt)
 /* this frame's exposure factor x1000 (bolex_vsync_cbr), 1000 = none */
 static volatile int bolex_flicker_x1000 = 1000;
 
-/* the shutter blanking for BOLEX_ANGLE x factor_x1000 / 1000 in a frame of tb Timer B units
+/* the shutter blanking for angle x factor_x1000 / 1000 in a frame of tb Timer B units
  * (the sensor exposes tb - blanking of them) */
-static int bolex_blanking(int tb, int factor_x1000)
+static int bolex_blanking(int tb, int angle, int factor_x1000)
 {
-    int exposure = (int)((int64_t) tb * BOLEX_ANGLE * factor_x1000 / (360 * 1000));
+    int exposure = (int)((int64_t) tb * angle * factor_x1000 / (360 * 1000));
     return COERCE(tb - exposure, 10, tb - 2);
 }
 /* Bolex modes, one after the other on INFO twice (bolex_info_pressed); 1620p at every power on.
  * Each: dannephoto's readout and line time (Timer A), Timer B while not recording, the slowest
- * Timer B allowed (its fastest speed), and the range the speed wanders in while recording
- * (fps x1000).  The file always plays at 24 (BOLEX_PLAY_FPS): 976p is slow motion. */
+ * Timer B allowed (its fastest speed), the range of speeds while recording (fps x1000), the
+ * shutter angle, the speed written in the file, and whether it is the Sena.
+ * The three Bolexes: the speed wanders smoothly, 133 degrees, the flicker, played at 24 (976p:
+ * slow motion).  The Sena (after Teo Hernandez's L'Eau de la Seine, on the 2.8K readout): the
+ * speed jumps between sena_fps[], 360 degrees, no flicker, played at 12; mlv_lite drops ~2 frames
+ * in 5 and draws a colour temperature per frame, no cuts. */
 #define BOLEX_MODE_1620     0
 #define BOLEX_MODE_28K      1
 #define BOLEX_MODE_976      2
-#define BOLEX_MODES         3
-struct bolex_mode { const char * name; int timer_a; int timer_b_idle; int timer_b_min; int fps_min; int fps_max; };
+#define BOLEX_MODE_SENA     3
+#define BOLEX_MODES         4
+struct bolex_mode { const char * name; int timer_a; int timer_b_idle; int timer_b_min; int fps_min; int fps_max; int angle; int play_fps; int sena; };
 static const struct bolex_mode bolex_modes[BOLEX_MODES] = {
-    { "1620p", 0x279, 0x838, 0x7E2, 20000, 25000 },     /* 2160x1620; 23.976 idle, 25 the most the LCD shows */
-    { "2.8K",  0x325, 0x676, 0x633, 20000, 25000 },     /* 1632x1224 of 2880x1226; 23.99 idle, 25 its most */
-    { "976p",  0x20F, 0x50E, 0x50E, 42000, 46800 },     /* 1296x972 of 1736x976 (3x3); 46.8 is its most */
+    { "1620p", 0x279, 0x838, 0x7E2, 20000, 25000, 133, 24, 0 },  /* 2160x1620; 23.976 idle, 25 the most the LCD shows */
+    { "2.8K",  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0 },  /* 1632x1224 of 2880x1226; 23.99 idle, 25 its most */
+    { "976p",  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0 },  /* 1296x972 of 1736x976 (3x3); 46.8 is its most */
+    { "SENA",  0x325, 3308,  0x633,  4000, 12000, 360, 12, 1 },  /* 2.8K readout; 12 idle; 4 / 6 / 8 / 12 */
 };
+
+/* Sena: the speeds drawn while recording (fps), each held SENA_HOLD_MIN_MS .. MAX_MS */
+static const int sena_fps[] = { 4, 6, 8, 12 };
+#define SENA_HOLD_MIN_MS    500
+#define SENA_HOLD_MAX_MS    2000
 static int bolex_mode = BOLEX_MODE_1620;    /* not saved: 1620p at every power on */
 
 
@@ -1468,7 +1479,7 @@ static void FAST adtg_hook(uint32_t* regs, uint32_t* stack, uint32_t pc)
     if (bolex_fmt && shutter_blanking)
     {
         int tb = (shamem_read(0xC0F06014) & 0xFFFF) + 1;
-        shutter_blanking = nrzi_encode(bolex_blanking(tb, bolex_flicker_x1000));
+        shutter_blanking = nrzi_encode(bolex_blanking(tb, bolex_modes[bolex_mode].angle, bolex_flicker_x1000));
     }
 
     /* all modes may want to override shutter speed */
@@ -1880,8 +1891,8 @@ static inline uint32_t reg_override_1X1(uint32_t reg, uint32_t old_val)
             if (Framerate_25) TimerB = 0x633;
             if (Framerate_30) TimerB = 0x633;  // 30 Doesn't work, make it 25
 
-            /* Bolex 2.8K: the speed of the moment (bolex_speed_task) */
-            if (bolex_fmt && bolex_mode == BOLEX_MODE_28K && bolex_timer_b_live)
+            /* Bolex 2.8K and Sena: the speed of the moment (bolex_speed_task) */
+            if (bolex_fmt && (bolex_mode == BOLEX_MODE_28K || bolex_mode == BOLEX_MODE_SENA) && bolex_timer_b_live)
                 TimerB = bolex_timer_b_live;
         }
 
@@ -6990,7 +7001,9 @@ static void slim_cover_hold_and_release(int hold_ms)
  * every power on), 2.8K (1632x1224 of the 1x1 2.8K readout, 20-25 fps) and 976p (1296x972 of
  * the 3x3 976p readout, 42-46.8 fps, played at 24: slow motion).  Everything else the same in
  * all three: 14-bit, 133 degrees, the flicker, drops, .KEL, the cuts.  No blue filter; white
- * balance 4500 K.)
+ * balance 4500 K.
+ * Then ("it worked"): the flicker a third stronger (+-0.059 stop, breaths 0.023-0.044), and the
+ * Sena 2.8K as a fourth mode on INFO twice, 14-bit, white balance 4500 K like the others.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -7059,6 +7072,16 @@ static int bolex_wander_step(struct bolex_wander * w, int dt, int fps_min, int f
     return COERCE(w->b, fps_min, fps_max);
 }
 
+/* Sena: the next speed, an index into sena_fps[], never the one before (cur, -1 = none) */
+static int sena_next(uint32_t * seed, int cur)
+{
+    int i;
+    do
+        i = (int)(bolex_rand(seed) % COUNT(sena_fps));
+    while (i == cur);
+    return i;
+}
+
 /* the readout Live View runs now is the one of bolex_mode (not half way through a switch) */
 static int bolex_mode_active(void)
 {
@@ -7067,7 +7090,8 @@ static int bolex_mode_active(void)
     switch (bolex_mode)
     {
         case BOLEX_MODE_1620: return crop_preset == CROP_PRESET_1X1 && CROP_1620p;
-        case BOLEX_MODE_28K:  return crop_preset == CROP_PRESET_1X1 && CROP_2_8K;
+        case BOLEX_MODE_28K:
+        case BOLEX_MODE_SENA: return crop_preset == CROP_PRESET_1X1 && CROP_2_8K;
         case BOLEX_MODE_976:  return crop_preset == CROP_PRESET_3X3 && High_FPS && AR_16_9;
     }
     return 0;
@@ -7081,6 +7105,8 @@ static int bolex_rec_start = 0;
 static void bolex_speed_task(void)
 {
     static struct bolex_wander w;
+    static uint32_t sena_seed = 1;
+    static int sena_cur = -1, sena_until = 0;
     int last = get_ms_clock();
     while (1)
     {
@@ -7100,12 +7126,27 @@ static void bolex_speed_task(void)
                     (int)(32000000000LL / ((m0->timer_a + 1) * (int64_t)(m0->timer_b_idle + 1))));
             }
             const struct bolex_mode * m = &bolex_modes[bolex_mode];
-            if (bolex_mode_active())
+            if (!bolex_mode_active())
+                continue;
+            if (m->sena)
+            {
+                /* Sena: a jump to another of sena_fps[] every 0.5 - 2 s */
+                if (sena_cur < 0 || now >= sena_until)
+                {
+                    if (sena_cur < 0)
+                        sena_seed = (uint32_t) now * 2654435761u + 1;
+                    sena_cur = sena_next(&sena_seed, sena_cur);
+                    sena_until = now + SENA_HOLD_MIN_MS + (int)(bolex_rand(&sena_seed) % (SENA_HOLD_MAX_MS - SENA_HOLD_MIN_MS + 1));
+                }
+                bolex_timer_b_live = bolex_timer_b_for(m, sena_fps[sena_cur] * 1000);
+            }
+            else
                 bolex_timer_b_live = bolex_timer_b_for(m, bolex_wander_step(&w, dt, m->fps_min, m->fps_max));
         }
         else
         {
             bolex_rec_start = 0;
+            sena_cur = -1;
             bolex_timer_b_live = bolex_mode_active() ? bolex_modes[bolex_mode].timer_b_idle : 0;
         }
     }
@@ -7119,7 +7160,7 @@ static unsigned int bolex_vsync_cbr(unsigned int unused)
     if (!bolex_fmt)
         return 0;
     int now = get_ms_clock();
-    if (RECORDING)
+    if (RECORDING && !bolex_modes[bolex_mode].sena)
     {
         if (!on)
         {
@@ -7172,7 +7213,13 @@ int bolex_format()
 /* used by mlv_lite: the frame rate written in the file (the camera films at BOLEX_FPS_X1000) */
 int bolex_play_fps()
 {
-    return bolex_fmt ? BOLEX_PLAY_FPS : 0;
+    return bolex_fmt ? bolex_modes[bolex_mode].play_fps : 0;
+}
+
+/* used by mlv_lite: the Sena mode is chosen */
+int bolex_sena()
+{
+    return bolex_fmt && bolex_modes[bolex_mode].sena;
 }
 
 /* Put every setting the Bolex keeps fixed back where it belongs.  Cheap; called often. */
@@ -7195,11 +7242,12 @@ static void bolex_fixed_settings(void)
     else
     {
         /* dannephoto's 1x1 1620p (2160x1620) or 2.8K (2880x1226), every pixel */
-        crop_preset_1x1_res_menu = bolex_mode == BOLEX_MODE_28K ? 1 : 6;   /* CROP_2_8K / CROP_1620p */
+        int k28 = bolex_mode == BOLEX_MODE_28K || bolex_mode == BOLEX_MODE_SENA;
+        crop_preset_1x1_res_menu = k28 ? 1 : 6;    /* CROP_2_8K / CROP_1620p */
         crop_preset_fps_menu = 1;       /* 25 (no 23.976 snapping); the Bolex speed replaces it */
         slim_mode_ui = 0;               /* 1x1 */
-        slim_1x1_ar = bolex_mode == BOLEX_MODE_28K ? 1 : 4;               /* 2.35:1 / 4:3 */
-        slim_unified_preset = bolex_mode == BOLEX_MODE_28K ? 1 : 0;
+        slim_1x1_ar = k28 ? 1 : 4;                 /* 2.35:1 / 4:3 */
+        slim_unified_preset = k28 ? 1 : 0;
         if (crop_preset_index != 1)
             crop_preset_index = 1;      /* 1x1 */
     }
@@ -7374,7 +7422,7 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
             secs / 60, secs % 60,
             bolex_modes[bolex_mode].name,
             fps / 1000, fps % 1000,
-            BOLEX_PLAY_FPS,
+            bolex_modes[bolex_mode].play_fps,
             exp_us > 0 ? (1000000 + exp_us / 2) / exp_us : 0,
             angle,
             lens_info.iso);
@@ -7394,7 +7442,7 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     snprintf(buffer, 64, "%s  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT",
         bolex_modes[bolex_mode].name,
         fps / 1000, fps % 1000,
-        BOLEX_PLAY_FPS,
+        bolex_modes[bolex_mode].play_fps,
         exp_us > 0 ? (1000000 + exp_us / 2) / exp_us : 0,
         angle,
         lens_info.iso);

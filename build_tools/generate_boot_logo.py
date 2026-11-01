@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate src/boot-logo-spans.inc (the FilmGate start-up screen).
+"""Generate src/boot-logo-spans.inc (the start-up screen; bolex3: the Alceste camera).
 
 Light background, navy/sky wordmark set in Jost Medium.  The picture is stored
 as horizontal runs {y, x, width, level}; level 26..28 is an edge-smoothing
@@ -43,22 +43,32 @@ def fit_title():
             return size - 1
     return hi
 
-def main():
-    size = fit_title()
-    title = tight(text_mask("MAGIC LANTERN", size, 3)[0])
-    # split colours: MAGIC navy, LANTERN sky
-    full_w = title.width
-    ma, _ = text_mask("MAGIC ", size, 3)
-    split = int(ImageFont.truetype(str(FONT), size * SS).getlength("MAGIC ") + 3 * 6 * SS)
-    sub = tight(text_mask("EOS M  ·  FILMGATE", 21, 6)[0])
+# The start-up screen's text (branch "bolex3": the camera set up for the film)
+INTRO = "Filmadora configurada para o filme"
+TITLE = "ALCESTE"
+CREDITS = "de Eur\u00edpides  \u00b7  de Carson  \u00b7  de Vini"
+TITLE_W2 = 470                   # width of TITLE
 
-    gap1, rule_h, gap2 = 34, 2, 30
-    th, sh = title.height // SS, sub.height // SS
-    block_h = th + gap1 + rule_h + gap2 + sh
+
+def fit(text, width, track):
+    for size in range(20, 220):
+        if tight(text_mask(text, size, track)[0]).width / SS > width:
+            return size - 1
+    return 220
+
+
+def main():
+    intro = tight(text_mask(INTRO, 25, 2)[0])
+    title = tight(text_mask(TITLE, fit(TITLE, TITLE_W2, 10), 10)[0])
+    credits = tight(text_mask(CREDITS, 23, 2)[0])
+
+    gap0, gap1, rule_h, gap2 = 30, 30, 2, 28
+    ih, th, ch = intro.height // SS, title.height // SS, credits.height // SS
+    block_h = ih + gap0 + th + gap1 + rule_h + gap2 + ch
     top = (H - block_h) // 2
     canvas = {}   # (x, y) -> level
 
-    def put(mask, x0, y0, navy, xsplit=None):
+    def put(mask, x0, y0, navy):
         w, h = mask.width // SS, mask.height // SS
         small = mask.resize((w, h), Image.BOX)
         px = small.load()
@@ -67,22 +77,26 @@ def main():
                 c = px[x, y] / 255.0
                 if c < 0.15:
                     continue
-                is_navy = navy if xsplit is None else (x * SS < xsplit)
-                if is_navy:
+                if navy:
                     lvl = 26 if c < 0.45 else 27 if c < 0.8 else 28
                 else:
                     lvl = 26 if c < 0.5 else 29
                 canvas[(x0 + x, y0 + y)] = lvl
 
-    tx = (W - th * 0 - title.width // SS) // 2
-    put(title, tx, top, True, xsplit=split - 0)
-    ry = top + th + gap1
-    rw = 520
-    for y in range(ry, ry + rule_h):
+    def centred(mask):
+        return (W - mask.width // SS) // 2
+
+    y = top
+    put(intro, centred(intro), y, False)
+    y += ih + gap0
+    put(title, centred(title), y, True)
+    y += th + gap1
+    rw = 470
+    for yy in range(y, y + rule_h):
         for x in range((W - rw) // 2, (W + rw) // 2):
-            canvas[(x, y)] = 29
-    sx = (W - sub.width // SS) // 2
-    put(sub, sx, ry + rule_h + gap2, True)
+            canvas[(x, yy)] = 29
+    y += rule_h + gap2
+    put(credits, centred(credits), y, True)
 
     spans = []
     for y in range(H):

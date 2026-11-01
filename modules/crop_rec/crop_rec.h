@@ -27,3 +27,5 @@ extern WEAK_FUNC(ret_0) int crop_rec_shutter_record();
 extern WEAK_FUNC(ret_0) int bolex_format();
 /* Bolex: the frame rate written in the file (the projection speed; the camera films faster); 0 = not a Bolex build */
 extern WEAK_FUNC(ret_0) int bolex_play_fps();
+/* Bolex: 1 while the Sena mode is chosen (its own speeds, drops and colours, no cuts) */
+extern WEAK_FUNC(ret_0) int bolex_sena();

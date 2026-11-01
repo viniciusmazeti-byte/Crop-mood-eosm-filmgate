@@ -564,8 +564,24 @@ static void bolex_int_next(uint32_t seed, int frame, struct bolex_int * v)
     v->dy_x100 = COERCE(v->dy_x100 * 7 / 10 + bolex_jitter(seed, frame, 4, BOLEX_WEAVE_Y_X100 / 2), -BOLEX_WEAVE_Y_X100, BOLEX_WEAVE_Y_X100);
 }
 
+/* Sena: a colour temperature for every frame, SENA_KELVIN_MIN .. MAX, drawn from the take's seed
+ * and the frame number; written in the .KEL like the Bolex intermittency (no flicker, no weave) */
+#define SENA_KELVIN_MIN     2000
+#define SENA_KELVIN_MAX     6000
+
+static int sena_kelvin(uint32_t seed, int frame)
+{
+    uint32_t x = seed ^ ((uint32_t) frame * 2654435761u);
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    x *= 2246822519u;
+    x ^= x >> 15;
+    return SENA_KELVIN_MIN + (int)(x % (SENA_KELVIN_MAX - SENA_KELVIN_MIN + 1));
+}
+
 /* write name.KEL next to the clip name.MLV: n frames */
-static void bolex_write_intermittency(const char * mlv_name, uint32_t seed, int n)
+static void bolex_write_intermittency(const char * mlv_name, uint32_t seed, int n, int sena)
 {
     char name[100];
     snprintf(name, sizeof(name), "%s", mlv_name);
@@ -579,10 +595,10 @@ static void bolex_write_intermittency(const char * mlv_name, uint32_t seed, int 
         return;
     static char buf[4096];
     int len = snprintf(buf, sizeof(buf),
-        "# Bolex intermittency per frame: frame kelvin ev dx dy, %d frames\n"
+        "# %s per frame: frame kelvin ev dx dy, %d frames\n"
         "# develop the clip at %d K, then apply with tools/lab.py\n"
         "# size %dx%d\n"
-        "# seed %u\n", n, BOLEX_KELVIN_BASE, res_x, res_y, (unsigned) seed);
+        "# seed %u\n", sena ? "Sena colour temperature" : "Bolex intermittency", n, BOLEX_KELVIN_BASE, res_x, res_y, (unsigned) seed);
     struct bolex_int v = { 0, 0, 0, 0 };
     for (int i = 0; i < n; i++)
     {
@@ -592,6 +608,11 @@ static void bolex_write_intermittency(const char * mlv_name, uint32_t seed, int 
             len = 0;
         }
         bolex_int_next(seed, i, &v);
+        if (sena)
+        {
+            v.kelvin = sena_kelvin(seed, i);
+            v.ev_x1000 = v.dx_x100 = v.dy_x100 = 0;
+        }
         len += snprintf(buf + len, sizeof(buf) - len, "%d %d %s%d.%03d %s%d.%02d %s%d.%02d\n", i, v.kelvin,
             v.ev_x1000 < 0 ? "-" : "", ABS(v.ev_x1000) / 1000, ABS(v.ev_x1000) % 1000,
             v.dx_x100 < 0 ? "-" : "", ABS(v.dx_x100) / 100, ABS(v.dx_x100) % 100,
@@ -620,6 +641,40 @@ static int bolex_drop_frame(uint32_t * seed, int * last)
     *last = ((*seed >> 16) % 1000) < BOLEX_DROP_PERMIL;
     return *last;
 }
+
+/* Sena (crop_rec's fourth mode, bolex_sena): frames dropped at random while recording - the
+ * movement jumps.  Mixed: a kept frame starts a drop with SENA_DROP_START_PERMIL / 1000, of 1
+ * frame (40%), 2 (25%), 3 (20%) or 4 (15%) frames (mean 2.1), and the frame after a drop is always
+ * kept: about 2 frames in 5 dropped, never more than 4 in a row. */
+#define SENA_DROP_START_PERMIL  317
+static uint32_t sena_drop_seed = 1;
+static int sena_drop_left = 0;      /* frames still to drop in the current burst */
+
+static int sena_drop_frame(uint32_t * seed, int * left)
+{
+    if (*left > 0)
+    {
+        /* still in a burst; after its last frame, one frame is always kept (-1) */
+        *left = (*left == 1) ? -1 : *left - 1;
+        return 1;
+    }
+    if (*left < 0)
+    {
+        *left = 0;
+        return 0;
+    }
+    *seed = *seed * 1664525u + 1013904223u;
+    if ((*seed >> 16) % 1000 >= SENA_DROP_START_PERMIL)
+        return 0;
+    *seed = *seed * 1664525u + 1013904223u;
+    int r = (*seed >> 16) % 100;
+    int burst = r < 40 ? 1 : r < 65 ? 2 : r < 85 ? 3 : 4;
+    *left = burst > 1 ? burst - 1 : -1;
+    return 1;
+}
+
+/* the take being recorded is a Sena one (bolex_sena() when it started) */
+static int bolex_take_sena = 0;
 
 /* Bolex info line (crop_rec.c): milliseconds left before REC starts, 0 = no countdown */
 static void raw_start_stop();   /* below */
@@ -3763,8 +3818,8 @@ void process_frame(int next_fullsize_buffer_pos)
         return;
     }
 
-    /* Bolex: the first second of the take is not recorded */
-    if (bolex_format())
+    /* Bolex: the first second of the take is not recorded (not in the Sena) */
+    if (bolex_format() && !bolex_take_sena)
     {
         int now = get_ms_clock();
         if (!bolex_take_t0)
@@ -3786,8 +3841,10 @@ void process_frame(int next_fullsize_buffer_pos)
         return;
     }
 
-    /* Bolex: a few single frames dropped (never the first one of a take) */
-    if (bolex_format() && frame_count > 1 && bolex_drop_frame(&bolex_drop_seed, &bolex_drop_last))
+    /* Bolex: a few single frames dropped (never the first one of a take); Sena: ~2 in 5 */
+    if (bolex_format() && frame_count > 1 &&
+        (bolex_take_sena ? sena_drop_frame(&sena_drop_seed, &sena_drop_left)
+                         : bolex_drop_frame(&bolex_drop_seed, &bolex_drop_last)))
         return;
     
     if (edmac_active)
@@ -4338,6 +4395,9 @@ void raw_video_rec_task(uint32_t thread)
         bolex_int_seed = (uint32_t) get_ms_clock() * 2654435761u ^ 0xB01E;
         bolex_drop_seed = bolex_int_seed ^ 0xD80Bu;
         bolex_drop_last = 0;
+        bolex_take_sena = bolex_sena();
+        sena_drop_seed = bolex_int_seed ^ 0x5E7Au;
+        sena_drop_left = 0;
         buffer_full = 0;
         pill_compression_ratio = 0;   /* start the pill's averages fresh for each clip */
         pill_write_speed = 0;
@@ -4941,7 +5001,7 @@ cleanup:
      * once the file is closed (bolex_trim_file).  A take that short is deleted. */
     int bolex_drop_take = 0;
     int bolex_trim_n = 0;
-    if (BOLEX_TRIM_MS > 0 && bolex_format() && thread == 0 && f && written_total[thread])
+    if (BOLEX_TRIM_MS > 0 && bolex_format() && !bolex_take_sena && thread == 0 && f && written_total[thread])
     {
         static int times[BOLEX_TAIL];
         int n = MIN(bolex_tail_n, BOLEX_TAIL);
@@ -4977,7 +5037,7 @@ cleanup:
 
     /* Bolex: the intermittency of every frame written in this take */
     if (bolex_format() && thread == 0 && named_clip && !bolex_drop_take && bolex_tail_n > 0)
-        bolex_write_intermittency(raw_movie_filename, bolex_int_seed, bolex_tail_n - bolex_trim_n);
+        bolex_write_intermittency(raw_movie_filename, bolex_int_seed, bolex_tail_n - bolex_trim_n, bolex_take_sena);
 
     if (bolex_drop_take && named_clip)
     {
