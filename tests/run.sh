@@ -36,6 +36,19 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "#define BOLEX_PLAY_FPS"
   python3 tests/extract.py $CR line     "#define BOLEX_ANGLE"
   python3 tests/extract.py $CR line     "#define BOLEX_SHUTTER_X1000"
+  python3 tests/extract.py $CR line     "#define BOLEX_FLICKER_X1000"
+  python3 tests/extract.py $CR line     "#define BOLEX_BREATH_MIN_X1000"
+  python3 tests/extract.py $CR line     "#define BOLEX_BREATH_MAX_X1000"
+  python3 tests/extract.py $CR line     "#define BOLEX_BREATH_LEN_MIN_MS"
+  python3 tests/extract.py $CR line     "#define BOLEX_BREATH_LEN_MAX_MS"
+  python3 tests/extract.py $CR line     "#define BOLEX_BREATH_EVERY_MIN_MS"
+  python3 tests/extract.py $CR line     "#define BOLEX_BREATH_EVERY_MAX_MS"
+  python3 tests/extract.py $CR function bolex_rand
+  python3 tests/extract.py $CR function bolex_rand_in
+  python3 tests/extract.py $CR function bolex_pow2_x1000
+  python3 tests/extract.py $CR line     "struct bolex_flicker {"
+  python3 tests/extract.py $CR function bolex_flicker_start
+  python3 tests/extract.py $CR function bolex_flicker_step
   python3 tests/extract.py $CR function bolex_blanking
   python3 tests/extract.py $CR line     "#define BOLEX_FPS_MIN_X1000"
   python3 tests/extract.py $CR line     "#define BOLEX_FPS_MAX_X1000"
@@ -46,7 +59,6 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "#define BOLEX_1620_TIMER_B"
   python3 tests/extract.py $CR function bolex_timer_b_for
   python3 tests/extract.py $CR line     "struct bolex_wander {"
-  python3 tests/extract.py $CR function bolex_rand
   python3 tests/extract.py $CR function bolex_wander_start
   python3 tests/extract.py $CR function bolex_wander_step
   python3 tests/extract.py $CR line     "static const int bolex_isos[]"

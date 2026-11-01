@@ -80,8 +80,44 @@ int main(void)
     for (int f = BOLEX_FPS_MIN_X1000; f <= BOLEX_FPS_MAX_X1000; f += 100)
     {
         int tb = bolex_timer_b_for(f) + 1;
-        double angle = 360.0 * (tb - bolex_blanking(tb)) / tb;
+        double angle = 360.0 * (tb - bolex_blanking(tb, 1000)) / tb;
         CHECK(fabs(angle - BOLEX_ANGLE) < 0.3, "%d fps x1000: %.2f degrees", f, angle);
+    }
+
+    /* 2^ev */
+    for (int ev = -1000; ev <= 1000; ev += 10)
+    {
+        double want = 1000 * pow(2.0, ev / 1000.0);
+        CHECK(fabs(bolex_pow2_x1000(ev) - want) < 1.5, "2^%d: %d, want %.1f", ev, bolex_pow2_x1000(ev), want);
+    }
+
+    /* the flicker in the camera: per frame within +-0.4 stop, breaths of 0.15..0.3 stop every
+     * 1..3 s; the angle it gives stays inside the frame */
+    {
+        struct bolex_flicker fl;
+        bolex_flicker_start(&fl, 99);
+        int lo = 0, hi = 0, breaths = 0, was = 0, n = 0, prev = 0, big_steps = 0;
+        int alo = 999, ahi = 0;
+        long sum = 0;
+        for (int t = 0; t < 600000; t += 42, n++)          /* 10 minutes at ~24 fps */
+        {
+            int ev = bolex_flicker_step(&fl, 42);
+            lo = ev < lo ? ev : lo; hi = ev > hi ? ev : hi;
+            sum += ev;
+            int in = fl.t - fl.breath_at < fl.breath_len;
+            breaths += in && !was; was = in;
+            big_steps += n && ABS(ev - prev) > 300; prev = ev;
+            CHECK(ABS(ev) <= BOLEX_FLICKER_X1000 + BOLEX_BREATH_MAX_X1000, "ev %d", ev);
+            int tb = bolex_timer_b_for(20000) + 1;
+            int ang = 360 * (tb - bolex_blanking(tb, bolex_pow2_x1000(ev))) / tb;
+            alo = ang < alo ? ang : alo; ahi = ang > ahi ? ang : ahi;
+            CHECK(ang > 60 && ang < 360, "angle %d", ang);
+        }
+        printf("flicker: %d..%d mEV, mean %ld, %d breaths in 10 min (one per %.1f s), angles %d..%d, %d%% frames jump > 0.3 EV\n",
+               lo, hi, sum / n, breaths, 600.0 / MAX(breaths, 1), alo, ahi, big_steps * 100 / n);
+        CHECK(lo < -500 && hi > 500, "breaths not reaching %d..%d", lo, hi);
+        CHECK(breaths > 600 / 3 && breaths < 600 / 1, "breaths %d", breaths);
+        CHECK(ABS(sum / n) < 30, "flicker not centred: %ld", sum / n);
     }
     {
         int t20 = bolex_timer_b_for(20000) + 1, t25 = bolex_timer_b_for(25000) + 1;

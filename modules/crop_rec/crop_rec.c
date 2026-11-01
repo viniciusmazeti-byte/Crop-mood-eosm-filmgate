@@ -126,11 +126,88 @@ extern int bolex_timer_b_live;
  * on the real camera.  Set in adtg_hook from the Timer B in use, Canon's shutter ignored. */
 #define BOLEX_ANGLE         133
 
-/* the shutter blanking for BOLEX_ANGLE in a frame of tb Timer B units (the sensor exposes
- * tb - blanking of them) */
-static int bolex_blanking(int tb)
+/* Exposure flicker, in the camera (in the RAW): while recording each frame gets BOLEX_ANGLE
+ * times 2^ev, ev drawn per frame within +- BOLEX_FLICKER_X1000 / 1000 stop, plus now and then a
+ * "breath": every BOLEX_BREATH_EVERY_MIN_MS .. MAX_MS the picture brightens or darkens by
+ * BOLEX_BREATH_MIN_X1000 .. MAX_X1000 stop for BOLEX_BREATH_LEN_MIN_MS .. MAX_MS (a smooth bump).
+ * Drawn at each vsync (bolex_vsync_cbr), applied in adtg_hook.  Not recording: none. */
+#define BOLEX_FLICKER_X1000         400
+#define BOLEX_BREATH_MIN_X1000      150
+#define BOLEX_BREATH_MAX_X1000      300
+#define BOLEX_BREATH_LEN_MIN_MS     400
+#define BOLEX_BREATH_LEN_MAX_MS     700
+#define BOLEX_BREATH_EVERY_MIN_MS   1000
+#define BOLEX_BREATH_EVERY_MAX_MS   3000
+
+static uint32_t bolex_rand(uint32_t * s)
 {
-    int exposure = tb * BOLEX_ANGLE / 360;
+    uint32_t x = *s ? *s : 0xB01E;
+    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+    return *s = x;
+}
+
+/* a random int in lo .. hi */
+static int bolex_rand_in(uint32_t * s, int lo, int hi)
+{
+    return lo + (int)(bolex_rand(s) % (uint32_t)(hi - lo + 1));
+}
+
+/* 2^(ev_x1000 / 1000) x 1000, for |ev| up to about 1 stop (series of e^(ev ln 2)) */
+static int bolex_pow2_x1000(int ev_x1000)
+{
+    int64_t y = (int64_t) ev_x1000 * 693147 / 1000;     /* ev ln 2, x 1e6 */
+    int64_t term = 1000000, sum = 1000000;
+    for (int k = 1; k <= 6; k++)
+    {
+        term = term * y / (1000000LL * k);
+        sum += term;
+    }
+    return (int)((sum + 500) / 1000);
+}
+
+struct bolex_flicker { uint32_t seed; int t; int breath_at; int breath_len; int breath_amp; int next_breath; };
+
+static void bolex_flicker_start(struct bolex_flicker * f, uint32_t seed)
+{
+    f->seed = seed | 1;
+    f->t = 0;
+    f->breath_at = 0;
+    f->breath_len = 0;
+    f->breath_amp = 0;
+    f->next_breath = bolex_rand_in(&f->seed, BOLEX_BREATH_EVERY_MIN_MS, BOLEX_BREATH_EVERY_MAX_MS);
+}
+
+/* the next frame, dt ms after the last: its ev x1000 */
+static int bolex_flicker_step(struct bolex_flicker * f, int dt)
+{
+    f->t += dt;
+    int ev = bolex_rand_in(&f->seed, -BOLEX_FLICKER_X1000, BOLEX_FLICKER_X1000);
+    if (f->t >= f->next_breath)
+    {
+        f->breath_at = f->t;
+        f->breath_len = bolex_rand_in(&f->seed, BOLEX_BREATH_LEN_MIN_MS, BOLEX_BREATH_LEN_MAX_MS);
+        f->breath_amp = bolex_rand_in(&f->seed, BOLEX_BREATH_MIN_X1000, BOLEX_BREATH_MAX_X1000);
+        if (bolex_rand(&f->seed) & 0x100)
+            f->breath_amp = -f->breath_amp;
+        f->next_breath = f->t + bolex_rand_in(&f->seed, BOLEX_BREATH_EVERY_MIN_MS, BOLEX_BREATH_EVERY_MAX_MS);
+    }
+    int in = f->t - f->breath_at;
+    if (f->breath_len && in >= 0 && in < f->breath_len)
+    {
+        int x = in * 1000 / f->breath_len;                      /* 0..1000 */
+        ev += (int)((int64_t) f->breath_amp * 4 * x * (1000 - x) / 1000000);
+    }
+    return ev;
+}
+
+/* this frame's exposure factor x1000 (bolex_vsync_cbr), 1000 = none */
+static volatile int bolex_flicker_x1000 = 1000;
+
+/* the shutter blanking for BOLEX_ANGLE x factor_x1000 / 1000 in a frame of tb Timer B units
+ * (the sensor exposes tb - blanking of them) */
+static int bolex_blanking(int tb, int factor_x1000)
+{
+    int exposure = (int)((int64_t) tb * BOLEX_ANGLE * factor_x1000 / (360 * 1000));
     return COERCE(tb - exposure, 10, tb - 2);
 }
 /* Bolex 32 fps on dannephoto's 976p (3x3 High FPS 16:9) readout: its line time (Timer A 0x20F),
@@ -1369,7 +1446,7 @@ static void FAST adtg_hook(uint32_t* regs, uint32_t* stack, uint32_t pc)
     if (bolex_fmt && shutter_blanking)
     {
         int tb = (shamem_read(0xC0F06014) & 0xFFFF) + 1;
-        shutter_blanking = nrzi_encode(bolex_blanking(tb));
+        shutter_blanking = nrzi_encode(bolex_blanking(tb, bolex_flicker_x1000));
     }
 
     /* all modes may want to override shutter speed */
@@ -6878,7 +6955,10 @@ static void slim_cover_hold_and_release(int hold_ms)
  * speed wanders smoothly between 20 and 25 fps for the whole take (bolex_speed_task), the
  * shutter stays at 133 degrees (bolex_blanking) so the exposure follows the speed; the file
  * plays at 24; the first and the last second of each take are dropped (mlv_lite).  No
- * countdown.  Before: each take started at 18 fps and rose to 23.976 in 2 s.)
+ * countdown.  Before: each take started at 18 fps and rose to 23.976 in 2 s.
+ * Then ("everything worked; the exposure flicker is too subtle - in the camera, not the .KEL"):
+ * the exposure flickers in the camera, +-0.4 stop per frame plus a "breath" every 1-3 s
+ * (bolex_flicker_step); the .KEL no longer carries an exposure.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -6934,13 +7014,6 @@ static int bolex_timer_b_for(int fps_x1000)
 /* the wandering speed: state, random numbers (xorshift), one step of dt ms -> fps x1000 */
 struct bolex_wander { uint32_t seed; int target; int a; int b; int hold_ms; };
 
-static uint32_t bolex_rand(uint32_t * s)
-{
-    uint32_t x = *s ? *s : 0xB01E;
-    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
-    return *s = x;
-}
-
 static void bolex_wander_start(struct bolex_wander * w, uint32_t seed, int fps_x1000)
 {
     w->seed = seed | 1;
@@ -6992,6 +7065,34 @@ static void bolex_speed_task(void)
             bolex_timer_b_live = BOLEX_1620_TIMER_B;
         }
     }
+}
+
+/* each frame while recording: this frame's flicker (bolex_flicker_step), applied in adtg_hook */
+static unsigned int bolex_vsync_cbr(unsigned int unused)
+{
+    static struct bolex_flicker f;
+    static int on = 0, last = 0;
+    if (!bolex_fmt)
+        return 0;
+    int now = get_ms_clock();
+    if (RECORDING)
+    {
+        if (!on)
+        {
+            bolex_flicker_start(&f, (uint32_t) now * 2246822519u);
+            on = 1;
+            last = now;
+        }
+        int ev = bolex_flicker_step(&f, COERCE(now - last, 1, 200));
+        bolex_flicker_x1000 = bolex_pow2_x1000(ev);
+        last = now;
+    }
+    else
+    {
+        on = 0;
+        bolex_flicker_x1000 = 1000;
+    }
+    return 0;
 }
 #define BOLEX_SHUTTER_X1000 (360 * BOLEX_FPS_X1000 / BOLEX_ANGLE)  /* 133 degrees: ~1/87 s, as 1/x * 1000 */
 
@@ -8682,6 +8783,7 @@ MODULE_CONFIGS_END()
 
 MODULE_CBRS_START()
     MODULE_CBR(CBR_SHOOT_TASK, crop_rec_polling_cbr, 0)
+    MODULE_CBR(CBR_VSYNC, bolex_vsync_cbr, 0)
     MODULE_CBR(CBR_RAW_INFO_UPDATE, raw_info_update_cbr, 0)
     MODULE_CBR(CBR_KEYPRESS, crop_rec_keypress_cbr, 0)
     MODULE_CBR(CBR_KEYPRESS, photo_keypress_cbr, 0)

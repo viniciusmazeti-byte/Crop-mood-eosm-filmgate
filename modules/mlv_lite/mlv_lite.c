@@ -531,7 +531,7 @@ static int bolex_trim_file(const char * name, int n)
  *   dx, dy  pixels; a slow wander plus a small jump each frame, more vertical (the pull-down) */
 #define BOLEX_KELVIN_BASE       5500
 #define BOLEX_KELVIN_JITTER     250
-#define BOLEX_EV_JITTER_X1000   100
+#define BOLEX_EV_JITTER_X1000   0       /* the flicker is now in the camera (crop_rec), not here */
 #define BOLEX_WEAVE_X_X100      150     /* +- 1.5 px of 2160 */
 #define BOLEX_WEAVE_Y_X100      300     /* +- 3 px of 1620 */
 static uint32_t bolex_int_seed = 0;
