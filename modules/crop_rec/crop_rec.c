@@ -127,17 +127,19 @@ extern int bolex_timer_b_live;
 #define BOLEX_ANGLE         133
 
 /* Exposure flicker, in the camera (in the RAW): while recording each frame gets BOLEX_ANGLE
- * times 2^ev, ev drawn per frame within +- BOLEX_FLICKER_X1000 / 1000 stop, plus now and then a
+ * times 2^ev, ev drawn every BOLEX_FLICKER_EVERY frames within +- BOLEX_FLICKER_X1000 / 1000 stop
+ * (and eased from one to the next over those frames), plus now and then a
  * "breath": every BOLEX_BREATH_EVERY_MIN_MS .. MAX_MS the picture brightens or darkens by
  * BOLEX_BREATH_MIN_X1000 .. MAX_X1000 stop for BOLEX_BREATH_LEN_MIN_MS .. MAX_MS (a smooth bump).
  * Drawn at each vsync (bolex_vsync_cbr), applied in adtg_hook.  Not recording: none. */
-#define BOLEX_FLICKER_X1000         133
-#define BOLEX_BREATH_MIN_X1000      50
-#define BOLEX_BREATH_MAX_X1000      100
+#define BOLEX_FLICKER_X1000         44
+#define BOLEX_FLICKER_EVERY         3       /* frames between new values, eased between them */
+#define BOLEX_BREATH_MIN_X1000      17
+#define BOLEX_BREATH_MAX_X1000      33
 #define BOLEX_BREATH_LEN_MIN_MS     400
 #define BOLEX_BREATH_LEN_MAX_MS     700
-#define BOLEX_BREATH_EVERY_MIN_MS   1000
-#define BOLEX_BREATH_EVERY_MAX_MS   3000
+#define BOLEX_BREATH_EVERY_MIN_MS   3000
+#define BOLEX_BREATH_EVERY_MAX_MS   9000
 
 static uint32_t bolex_rand(uint32_t * s)
 {
@@ -165,7 +167,7 @@ static int bolex_pow2_x1000(int ev_x1000)
     return (int)((sum + 500) / 1000);
 }
 
-struct bolex_flicker { uint32_t seed; int t; int breath_at; int breath_len; int breath_amp; int next_breath; };
+struct bolex_flicker { uint32_t seed; int t; int breath_at; int breath_len; int breath_amp; int next_breath; int from; int to; int k; };
 
 static void bolex_flicker_start(struct bolex_flicker * f, uint32_t seed)
 {
@@ -174,6 +176,8 @@ static void bolex_flicker_start(struct bolex_flicker * f, uint32_t seed)
     f->breath_at = 0;
     f->breath_len = 0;
     f->breath_amp = 0;
+    f->from = f->to = 0;
+    f->k = 0;
     f->next_breath = bolex_rand_in(&f->seed, BOLEX_BREATH_EVERY_MIN_MS, BOLEX_BREATH_EVERY_MAX_MS);
 }
 
@@ -181,7 +185,14 @@ static void bolex_flicker_start(struct bolex_flicker * f, uint32_t seed)
 static int bolex_flicker_step(struct bolex_flicker * f, int dt)
 {
     f->t += dt;
-    int ev = bolex_rand_in(&f->seed, -BOLEX_FLICKER_X1000, BOLEX_FLICKER_X1000);
+    if (f->k == 0)
+    {
+        f->from = f->to;
+        f->to = bolex_rand_in(&f->seed, -BOLEX_FLICKER_X1000, BOLEX_FLICKER_X1000);
+    }
+    f->k = (f->k + 1) % BOLEX_FLICKER_EVERY;
+    int step = f->k ? f->k : BOLEX_FLICKER_EVERY;               /* 1..EVERY */
+    int ev = f->from + (f->to - f->from) * step / BOLEX_FLICKER_EVERY;
     if (f->t >= f->next_breath)
     {
         f->breath_at = f->t;
@@ -6960,7 +6971,9 @@ static void slim_cover_hold_and_release(int hold_ms)
  * the exposure flickers in the camera, +-0.4 stop per frame plus a "breath" every 1-3 s
  * (bolex_flicker_step); the .KEL no longer carries an exposure.
  * Then ("too frantic and too visible, a third of it"): +-0.133 stop per frame, breaths of
- * 0.05-0.1 stop.)
+ * 0.05-0.1 stop.
+ * Then ("still too frantic and strong: a third of the frenzy and the strength"): +-0.044 stop,
+ * a new value every 3 frames (eased), breaths of 0.017-0.033 stop every 3-9 s.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave

@@ -37,6 +37,7 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "#define BOLEX_ANGLE"
   python3 tests/extract.py $CR line     "#define BOLEX_SHUTTER_X1000"
   python3 tests/extract.py $CR line     "#define BOLEX_FLICKER_X1000"
+  python3 tests/extract.py $CR line     "#define BOLEX_FLICKER_EVERY"
   python3 tests/extract.py $CR line     "#define BOLEX_BREATH_MIN_X1000"
   python3 tests/extract.py $CR line     "#define BOLEX_BREATH_MAX_X1000"
   python3 tests/extract.py $CR line     "#define BOLEX_BREATH_LEN_MIN_MS"
