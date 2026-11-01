@@ -51,8 +51,12 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR function bolex_flicker_start
   python3 tests/extract.py $CR function bolex_flicker_step
   python3 tests/extract.py $CR function bolex_blanking
+  python3 tests/extract.py $CR line     "#define BOLEX_RO_1620"
+  python3 tests/extract.py $CR line     "#define BOLEX_RO_28K"
+  python3 tests/extract.py $CR line     "#define BOLEX_RO_976"
   python3 tests/extract.py $CR line     "#define BOLEX_MODE_1620"
-  python3 tests/extract.py $CR line     "#define BOLEX_MODE_28K"
+  python3 tests/extract.py $CR line     "#define BOLEX_MODE_166"
+  python3 tests/extract.py $CR line     "#define BOLEX_MODE_185"
   python3 tests/extract.py $CR line     "#define BOLEX_MODE_976"
   python3 tests/extract.py $CR line     "#define BOLEX_MODE_SENA"
   python3 tests/extract.py $CR line     "#define BOLEX_MODES"

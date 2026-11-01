@@ -48,7 +48,7 @@ int main(void)
     /* the three modes: dannephoto's timers; idle and fastest speeds */
     {
         const struct bolex_mode * m = bolex_modes;
-        CHECK(m[BOLEX_MODE_1620].timer_a == 0x279 && m[BOLEX_MODE_28K].timer_a == 0x325 && m[BOLEX_MODE_976].timer_a == 0x20F, "timer A");
+        CHECK(m[BOLEX_MODE_1620].timer_a == 0x279 && m[BOLEX_MODE_166].timer_a == 0x325 && m[BOLEX_MODE_185].timer_a == 0x325 && m[BOLEX_MODE_976].timer_a == 0x20F, "timer A");
         for (int i = 0; i < BOLEX_MODES; i++)
         {
             if (m[i].sena)
@@ -152,7 +152,7 @@ int main(void)
     {
         const struct bolex_mode * m = &bolex_modes[BOLEX_MODE_SENA];
         CHECK(m->sena && m->timer_a == 0x325 && m->angle == 360 && m->play_fps == 12, "Sena mode");
-        CHECK(bolex_modes[BOLEX_MODE_28K].timer_a == m->timer_a, "Sena on the 2.8K line time");
+        CHECK(m->readout == BOLEX_RO_28K && bolex_modes[BOLEX_MODE_166].timer_a == m->timer_a, "Sena on the 2.8K readout");
         for (int i = 0; i < (int) COUNT(sena_fps); i++)
         {
             int b = bolex_timer_b_for(m, sena_fps[i] * 1000);
@@ -231,6 +231,20 @@ int main(void)
 
     /* 976p 3x3 readout: 976 picture lines, square pixels, the centre 4:3 recorded */
     check_43("4:3 1620p", 1620, 0);
+
+    /* each mode's recorded frame, as mlv_lite works it out from the readout height */
+    for (int mi = 0; mi < BOLEX_MODES; mi++)
+    {
+        const struct bolex_mode * m = &bolex_modes[mi];
+        int max_y = m->readout == BOLEX_RO_1620 ? 1620 : m->readout == BOLEX_RO_28K ? 1226 : 976;
+        int max_x = m->readout == BOLEX_RO_1620 ? 2160 : m->readout == BOLEX_RO_28K ? 2880 : 1736;
+        int num = m->aspect_x100 == 133 ? 4 : m->aspect_x100, den = m->aspect_x100 == 133 ? 3 : 100;
+        int w = MIN((max_y * num / den) & ~15, max_x);
+        int h = calc_res_y(w, max_y, num, den, 1.0f);
+        double ar = (double) w / h;
+        printf("frame %s: %dx%d, %.3f:1\n", m->name, w, h, ar);
+        CHECK(fabs(ar - m->aspect_x100 / 100.0) < 0.012 && h <= max_y && w % 16 == 0, "%s frame %dx%d", m->name, w, h);
+    }
     CHECK(BOLEX_RES_X == ((1620 * 4 / 3) & ~15), "width %d", BOLEX_RES_X);
 
     /* the width suits the raw format (8 pixels) and the lossless encoder (16) */

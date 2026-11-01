@@ -1257,13 +1257,17 @@ void update_resolution_params()
     int num = aspect_ratio_presets_num[aspect_ratio_index];
     int den = aspect_ratio_presets_den[aspect_ratio_index];
 
-    /* Bolex 4:3: BOLEX_RES_X wide (centred), and as high as gives 4:3: 1296x972 on the 976p
-     * readout (square pixels).  On a stretched readout (3x5) the RAWC block says by how much. */
+    /* Bolex: the mode's frame (crop_rec bolex_aspect_x100: 4:3, 1.66, 1.85) with the full height
+     * of the readout, centred (square pixels): 2160x1620 (1620p), 2032x1224 / 2256x1220 (2.8K),
+     * 1296x972 (976p) */
     if (bolex_format())
     {
-        res_x = MIN((max_res_y * 4 / 3) & ~15, max_res_x);   /* 4:3 with the full height */
-        num = 4;
-        den = 3;
+        int a = bolex_aspect_x100() ? bolex_aspect_x100() : 133;
+        if (a == 133)
+            num = 4, den = 3;
+        else
+            num = a, den = 100;
+        res_x = MIN((max_res_y * num / den) & ~15, max_res_x);
     }
 
     res_y = calc_res_y(res_x, max_res_y, num, den, squeeze_factor);

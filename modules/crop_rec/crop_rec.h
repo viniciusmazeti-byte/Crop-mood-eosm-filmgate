@@ -29,3 +29,5 @@ extern WEAK_FUNC(ret_0) int bolex_format();
 extern WEAK_FUNC(ret_0) int bolex_play_fps();
 /* Bolex: 1 while the Sena mode is chosen (its own speeds, drops and colours, no cuts) */
 extern WEAK_FUNC(ret_0) int bolex_sena();
+/* Bolex: the frame to record, width : height x 100 (133 = 4:3, 166, 185); 0 = not a Bolex build */
+extern WEAK_FUNC(ret_0) int bolex_aspect_x100();
