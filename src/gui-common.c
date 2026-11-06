@@ -674,6 +674,7 @@ int bolex_build = 1;
 /* ISO steps of the Up / Down arrows, not yet applied (+ = higher): crop_rec (bolex_step)
  * steps through ISO 100 / 200 / 400 */
 int bolex_iso_clicks = 0;
+int bolex_lr_clicks = 0;     /* Left / Right presses (not while recording): crop_rec's sensor test */
 
 /* Movie Live View: the touchscreen does nothing (no Quick Panel, editors or touch AF) */
 static int handle_bolex_keys(struct event * event)
@@ -693,10 +694,13 @@ static int handle_bolex_keys(struct event * event)
          * back (camera test: the picture darkened and came back). */
         case BGMT_WHEEL_RIGHT:
         case BGMT_WHEEL_LEFT:
-        case BGMT_PRESS_RIGHT:
-        case BGMT_PRESS_LEFT:
         case BGMT_UNPRESS_RIGHT:
         case BGMT_UNPRESS_LEFT:
+            return 0;
+        case BGMT_PRESS_RIGHT:
+        case BGMT_PRESS_LEFT:
+            if (!RECORDING)
+                bolex_lr_clicks += (event->param == BGMT_PRESS_RIGHT) ? 1 : -1;
             return 0;
 
         /* Up / Down arrows: ISO 100 / 200 / 400 (not while recording).  Swallowed, also the

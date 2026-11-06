@@ -584,6 +584,12 @@ static int sena_kelvin(uint32_t seed, int frame)
 static int bolex_take_sena = 0;
 /* ... an infinity one (976p INF: no dropped frames) */
 static int bolex_take_inf = 0;
+/* ... a sensor test one (no dropped frames): when the sensor offset changed (frame, offset,
+ * CMOS lists Canon had written so far), for the .KEL */
+static int bolex_take_test = 0;
+#define BOLEX_TEST_LOG  64
+static struct { int frame; int delta; int writes; } bolex_test_log[BOLEX_TEST_LOG];
+static int bolex_test_log_n = 0;
 /* frames filmed in the take after its first second (kept or not), and when the first and the
  * last of them came: the real speed, written in the .KEL */
 static int bolex_filmed = 0, bolex_film_t0 = 0, bolex_film_t1 = 0;
@@ -617,6 +623,12 @@ static void bolex_write_intermittency(const char * mlv_name, uint32_t seed, int 
         "# filmed at %d.%02d fps (%d frames in %d ms), shown at %d fps\n",
         sena ? "Sena colour temperature" : "Bolex intermittency", n, BOLEX_KELVIN_BASE, res_x, res_y, (unsigned) seed,
         bolex_film_fps_x100() / 100, bolex_film_fps_x100() % 100, bolex_filmed, bolex_film_t1 - bolex_film_t0, bolex_play_fps());
+    for (int k = 0; k < bolex_test_log_n && len < (int) sizeof(buf) - 80; k++)
+        len += snprintf(buf + len, sizeof(buf) - len,
+            "# sensor test: from frame %d, CMOS[7] offset %d (Canon CMOS lists written so far: %d)\n",
+            bolex_test_log[k].frame, bolex_test_log[k].delta, bolex_test_log[k].writes);
+    if (bolex_take_test)
+        len += snprintf(buf + len, sizeof(buf) - len, "# sensor test: CMOS lists written by the end: %d\n", bolex_test_writes());
     struct bolex_int v = { 0, 0, 0, 0 };
     for (int i = 0; i < n; i++)
     {
@@ -3935,7 +3947,17 @@ void process_frame(int next_fullsize_buffer_pos)
     }
 
     /* Bolex: a few single frames dropped (never the first one of a take); Sena: ~2 in 5 */
-    if (bolex_format() && frame_count > 1 && !bolex_take_inf &&
+    /* sensor test: note each change of the offset, with the frame it came at */
+    if (bolex_take_test && bolex_test_log_n < BOLEX_TEST_LOG &&
+        (bolex_test_log_n == 0 || bolex_test_log[bolex_test_log_n - 1].delta != bolex_test_delta()))
+    {
+        bolex_test_log[bolex_test_log_n].frame = frame_count;
+        bolex_test_log[bolex_test_log_n].delta = bolex_test_delta();
+        bolex_test_log[bolex_test_log_n].writes = bolex_test_writes();
+        bolex_test_log_n++;
+    }
+
+    if (bolex_format() && frame_count > 1 && !bolex_take_inf && !bolex_take_test &&
         (bolex_take_sena ? sena_drop_frame(&sena_drop_seed, &sena_drop_left)
                          : bolex_drop_frame(&bolex_drop_seed, &bolex_drop_last)))
         return;
@@ -4490,6 +4512,8 @@ void raw_video_rec_task(uint32_t thread)
         bolex_drop_last = 0;
         bolex_take_sena = bolex_sena();
         bolex_take_inf = bolex_infinity() != 0;
+        bolex_take_test = bolex_test();
+        bolex_test_log_n = 0;
         bolex_filmed = bolex_film_t0 = bolex_film_t1 = 0;
         sena_drop_seed = bolex_int_seed ^ 0x5E7Au;
         sena_drop_left = 0;

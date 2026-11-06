@@ -239,19 +239,37 @@ static int bolex_blanking(int tb, int angle, int factor_x1000)
 #define BOLEX_MODE_976      4
 #define BOLEX_MODE_976_166  5
 #define BOLEX_MODE_SENA     6
-#define BOLEX_MODES         7
+#define BOLEX_MODE_TEST     7
+#define BOLEX_MODES         8
 /* + the frame recorded (width : height x 100, the full height of the readout; mlv_lite), and a
  * smaller window (its width, 0 = none) that travels an infinity sign inside the readout */
-struct bolex_mode { const char * name; int readout; int timer_a; int timer_b_idle; int timer_b_min; int fps_min; int fps_max; int angle; int play_fps; int sena; int aspect_x100; int window_x; };
+struct bolex_mode { const char * name; int readout; int timer_a; int timer_b_idle; int timer_b_min; int fps_min; int fps_max; int angle; int play_fps; int sena; int aspect_x100; int window_x; int test; };
 static const struct bolex_mode bolex_modes[BOLEX_MODES] = {
-    { "1620p",     BOLEX_RO_1620, 0x279, 0x838, 0x7E2, 20000, 25000, 133, 24, 0, 133, 0 }, /* 2160x1620; 23.976 idle, 25 the most the LCD shows */
-    { "976p INF",  BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 1024 }, /* 1024x768 travelling an infinity sign */
-    { "2.8K 1.66", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 166, 0 }, /* 2032x1224 of 2880x1226; 23.99 idle, 25 its most */
-    { "2.8K 1.85", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 185, 0 }, /* 2256x1220 of 2880x1226 */
-    { "976p",      BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 0 }, /* 1296x972 of 1736x976 (3x3); 46.8 is its most */
-    { "976p 1.66", BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 166, 0 }, /* 1616x974 of 1736x976 */
-    { "SENA",      BOLEX_RO_28K,  0x325, 3308,  0x633,  4000, 12000, 360, 12, 1, 133, 0 }, /* 1632x1224 of 2.8K; 12 idle; 4 / 6 / 8 / 12 */
+    { "1620p",     BOLEX_RO_1620, 0x279, 0x838, 0x7E2, 20000, 25000, 133, 24, 0, 133, 0, 0 }, /* 2160x1620; 23.976 idle, 25 the most the LCD shows */
+    { "976p INF",  BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 1024, 0 }, /* 1024x768 travelling an infinity sign */
+    { "2.8K 1.66", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 166, 0, 0 }, /* 2032x1224 of 2880x1226; 23.99 idle, 25 its most */
+    { "2.8K 1.85", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 185, 0, 0 }, /* 2256x1220 of 2880x1226 */
+    { "976p",      BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 0, 0 }, /* 1296x972 of 1736x976 (3x3); 46.8 is its most */
+    { "976p 1.66", BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 166, 0, 0 }, /* 1616x974 of 1736x976 */
+    { "SENA",      BOLEX_RO_28K,  0x325, 3308,  0x633,  4000, 12000, 360, 12, 1, 133, 0, 0 }, /* 1632x1224 of 2.8K; 12 idle; 4 / 6 / 8 / 12 */
+    { "SENSOR",    BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 0, 1 },    /* test: the sensor's own window, moved (bolex_sensor_delta) */
 };
+
+/* Sensor test (the eighth mode, last; camera test of "make the infinity fluid"): the window the
+ * crop cuts can only sit on 8-pixel steps, so try moving the sensor's own readout instead.
+ * bolex_sensor_delta is added to CMOS[7] (the 976p readout's horizontal position, 0x802) -
+ * how far one unit moves the picture, and whether Canon writes CMOS registers while recording
+ * (bolex_cmos_writes) so it could change frame by frame, is what the test finds out.
+ * Not recording: Left / Right change it (Live View rebuilt).  Recording: +1 every
+ * BOLEX_TEST_STEP_MS from there.  No flicker, no drops, the window still. */
+#define BOLEX_TEST_STEP_MS  2000
+#define BOLEX_TEST_MIN      (-2)        /* CMOS[7]'s low field stays in 0 .. 63 */
+#define BOLEX_TEST_MAX      40
+static volatile int bolex_sensor_delta = 0;
+static volatile int bolex_cmos_writes = 0;  /* CMOS register lists Canon wrote (cmos_hook) */
+static int bolex_cmos_writes0 = 0;          /* ... when the take started */
+static int bolex_test_base = 0;             /* the value set by hand, back to it after a take */
+static volatile int bolex_test_refresh = 0; /* Live View to rebuild (bolex_step) */
 
 /* Sena: the speeds drawn while recording (fps), each held SENA_HOLD_MIN_MS .. MAX_MS */
 static const int sena_fps[] = { 4, 6, 8, 12 };
@@ -1102,6 +1120,7 @@ static void FAST cmos_hook(uint32_t* regs, uint32_t* stack, uint32_t pc)
 
     uint16_t* data_buf = (uint16_t*) regs[0];
     int cmos_new[15] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+    bolex_cmos_writes++;
     
 
 
@@ -1242,7 +1261,7 @@ static void FAST cmos_hook(uint32_t* regs, uint32_t* stack, uint32_t pc)
             case CROP_PRESET_3X3:
                 if (High_FPS)
                 {
-                    if (AR_16_9)   cmos_new[7] = 0x802;
+                    if (AR_16_9)   cmos_new[7] = 0x802 + ((bolex_fmt && bolex_modes[bolex_mode].test) ? bolex_sensor_delta : 0);
                     if (AR_2_1    || 
                         AR_2_20_1) cmos_new[7] = 0x804;
                     if (AR_2_35_1 ||
@@ -7139,6 +7158,7 @@ static void bolex_speed_task(void)
             if (!bolex_rec_start)
             {
                 bolex_rec_start = now;
+                bolex_cmos_writes0 = bolex_cmos_writes;
                 const struct bolex_mode * m0 = &bolex_modes[bolex_mode];
                 bolex_wander_start(&w, (uint32_t) now * 2654435761u,
                     (int)(32000000000LL / ((m0->timer_a + 1) * (int64_t)(m0->timer_b_idle + 1))));
@@ -7146,6 +7166,8 @@ static void bolex_speed_task(void)
             const struct bolex_mode * m = &bolex_modes[bolex_mode];
             if (!bolex_mode_active())
                 continue;
+            if (m->test)
+                bolex_sensor_delta = MIN(bolex_test_base + (now - bolex_rec_start) / BOLEX_TEST_STEP_MS, BOLEX_TEST_MAX);
             if (m->sena)
             {
                 /* Sena: a jump to another of sena_fps[] every 0.5 - 2 s */
@@ -7163,6 +7185,11 @@ static void bolex_speed_task(void)
         }
         else
         {
+            if (bolex_rec_start && bolex_modes[bolex_mode].test && bolex_sensor_delta != bolex_test_base)
+            {
+                bolex_sensor_delta = bolex_test_base;   /* back to the value set by hand */
+                bolex_test_refresh = 1;
+            }
             bolex_rec_start = 0;
             sena_cur = -1;
             bolex_timer_b_live = bolex_mode_active() ? bolex_modes[bolex_mode].timer_b_idle : 0;
@@ -7178,7 +7205,7 @@ static unsigned int bolex_vsync_cbr(unsigned int unused)
     if (!bolex_fmt)
         return 0;
     int now = get_ms_clock();
-    if (RECORDING && !bolex_modes[bolex_mode].sena)
+    if (RECORDING && !bolex_modes[bolex_mode].sena && !bolex_modes[bolex_mode].test)
     {
         if (!on)
         {
@@ -7244,6 +7271,22 @@ int bolex_aspect_x100()
 int bolex_infinity()
 {
     return bolex_fmt ? bolex_modes[bolex_mode].window_x : 0;
+}
+
+/* used by mlv_lite: the sensor test mode is chosen; its CMOS[7] offset now; CMOS lists written */
+int bolex_test()
+{
+    return bolex_fmt && bolex_modes[bolex_mode].test;
+}
+
+int bolex_test_delta()
+{
+    return bolex_sensor_delta;
+}
+
+int bolex_test_writes()
+{
+    return bolex_cmos_writes;
 }
 
 /* used by mlv_lite: the Sena mode is chosen */
@@ -7351,6 +7394,33 @@ static void bolex_step(void)
     if (eosm_lv_guard_busy)
         return;
 #endif
+
+    /* sensor test: Left / Right move the sensor's readout by one unit; elsewhere they do nothing */
+    {
+        extern int bolex_lr_clicks;
+        if (bolex_modes[bolex_mode].test)
+        {
+            if (bolex_lr_clicks)
+            {
+                bolex_test_base = COERCE(bolex_test_base + (bolex_lr_clicks > 0 ? 1 : -1), BOLEX_TEST_MIN, BOLEX_TEST_MAX);
+                bolex_lr_clicks = 0;
+                bolex_sensor_delta = bolex_test_base;
+                bolex_test_refresh = 1;
+                NotifyBox(1500, "SENSOR %s%d (CMOS[7] %03X)", bolex_test_base >= 0 ? "+" : "", bolex_test_base, 0x802 + bolex_test_base);
+            }
+        }
+        else
+        {
+            bolex_lr_clicks = 0;
+            bolex_test_base = bolex_sensor_delta = 0;
+        }
+        if (bolex_test_refresh)
+        {
+            bolex_test_refresh = 0;
+            eosm_lv_guard_request();
+            return;
+        }
+    }
 
     /* crop_rec's readouts exist only in Canon's x5 view.  At x1 Canon shows its own 1080p: on
      * the EOS M that is 1736x976 at 23.976 fps - the size of the 976p readout, so it passes for
@@ -7461,6 +7531,15 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     {
         /* the speed changes all through the take: real time since it started */
         int secs = bolex_rec_start ? (get_ms_clock() - bolex_rec_start) / 1000 : 0;
+        if (bolex_modes[bolex_mode].test)
+        {
+            /* sensor test: the offset now, and the CMOS lists Canon wrote since REC */
+            snprintf(buffer, 64, "REC %d:%02d  SENSOR %s%d  CMOS %d  %d.%03d FPS",
+                secs / 60, secs % 60, bolex_sensor_delta >= 0 ? "+" : "", bolex_sensor_delta, bolex_cmos_writes - bolex_cmos_writes0, fps / 1000, fps % 1000);
+            item->color_bg = COLOR_RED;
+            item->color_fg = COLOR_WHITE;
+            return;
+        }
         snprintf(buffer, 64, "REC %d:%02d  %s  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d",
             secs / 60, secs % 60,
             bolex_modes[bolex_mode].name,
@@ -7479,6 +7558,14 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
     {
         snprintf(buffer, 64, "BOLEX %s ...", bolex_modes[bolex_mode].name);
         item->color_fg = COLOR_YELLOW;
+        return;
+    }
+
+    if (bolex_modes[bolex_mode].test)
+    {
+        snprintf(buffer, 64, "SENSOR %s%d (CMOS[7] %03X)  < >  %d.%03d FPS  ISO %d",
+            bolex_sensor_delta >= 0 ? "+" : "", bolex_sensor_delta, 0x802 + bolex_sensor_delta, fps / 1000, fps % 1000, lens_info.iso);
+        item->color_fg = COLOR_CYAN;
         return;
     }
 

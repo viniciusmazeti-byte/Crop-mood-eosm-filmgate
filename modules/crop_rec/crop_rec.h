@@ -33,3 +33,7 @@ extern WEAK_FUNC(ret_0) int bolex_sena();
 extern WEAK_FUNC(ret_0) int bolex_aspect_x100();
 /* Bolex: the width of the window that travels an infinity sign while recording (0 = none) */
 extern WEAK_FUNC(ret_0) int bolex_infinity();
+/* Bolex sensor test: chosen; the offset added to CMOS[7] now; CMOS register lists Canon wrote */
+extern WEAK_FUNC(ret_0) int bolex_test();
+extern WEAK_FUNC(ret_0) int bolex_test_delta();
+extern WEAK_FUNC(ret_0) int bolex_test_writes();
