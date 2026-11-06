@@ -4322,6 +4322,8 @@ void init_mlv_chunk_headers(struct raw_info * raw_info)
         /* 16-bit (Bolex QUAD): the 14-bit values either as they are or shifted up by 2 bits -
          * the raw buffer tells which (bolex16_scale) */
         int k = bolex16_scale();
+        extern int raw_16bit_shift;     /* the gray preview while recording (raw.c) */
+        raw_16bit_shift = (k == 4) ? 2 : 0;
         rawi_hdr.raw_info.black_level = black14 * k;
         rawi_hdr.raw_info.white_level = white14 * k;
     }

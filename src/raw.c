@@ -83,6 +83,9 @@ int raw_overlay_calibration_ready(void)
         && raw_info.bits_per_pixel == 14;
 }
 
+/* 16-bit raw: 0 if the values are the 14-bit ones, 2 if shifted up 2 bits (set by mlv_lite) */
+int raw_16bit_shift = 2;
+
 int raw_params_ready_for_rec(void)
 {
     /* any bit depth mlv_lite records in: on the EOS M it is set before this check (14-bit only
@@ -1938,6 +1941,7 @@ static void FAST raw_preview_fast_work(void* raw_buffer, void* lv_buffer, int y1
         memset(&lv64[LV(x2,y)/8], 0, LV(0,1) - LV(x2,0)/8*8);
 
         struct raw_pixblock * row = (void*)raw + yr * raw_info.pitch;
+        uint16_t * row16 = (void*)row;      /* 16-bit raw: one pixel per word */
         
         if (y%2) continue;
 
@@ -1945,7 +1949,7 @@ static void FAST raw_preview_fast_work(void* raw_buffer, void* lv_buffer, int y1
         {
             int xr = lv2rx[x];
             struct raw_pixblock * p = row + (xr/8);
-            int c = p->a;
+            int c = (raw_info.bits_per_pixel == 16) ? row16[xr] >> raw_16bit_shift : p->a;
             uint64_t Y = gamma[COERCE(c - black, 0, white-black) >> div];
             Y = (Y << 8) | (Y << 24) | (Y << 40) | (Y << 56);
             int idx = LV(x,y)/8;
@@ -1958,7 +1962,11 @@ static void FAST raw_preview_fast_work(void* raw_buffer, void* lv_buffer, int y1
 
 void FAST raw_preview_fast_ex(void* raw_buffer, void* lv_buffer, int y1, int y2, int quality)
 {
-    if (raw_info.bits_per_pixel != 14)
+    /* 16-bit (mlv_lite's Bolex QUAD): the fast gray preview only (camera test: the screen froze
+     * while recording - this used to return at once for anything but 14-bit) */
+    if (raw_info.bits_per_pixel == 16 && quality == RAW_PREVIEW_GRAY_ULTRA_FAST)
+        ;
+    else if (raw_info.bits_per_pixel != 14)
         return;
 
     yuv422_buffer_check();
