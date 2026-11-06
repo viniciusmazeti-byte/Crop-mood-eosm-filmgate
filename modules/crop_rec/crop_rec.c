@@ -232,6 +232,7 @@ static int bolex_blanking(int tb, int angle, int factor_x1000)
 #define BOLEX_RO_1620       0   /* readouts: dannephoto's 1x1 1620p, 1x1 2.8K, 3x3 976p */
 #define BOLEX_RO_28K        1
 #define BOLEX_RO_976        2
+#define BOLEX_RO_694        3   /* dannephoto's 3x3 High FPS "2.50:1", 1736x694 at 60 fps */
 #define BOLEX_MODE_1620     0
 #define BOLEX_MODE_INF      1
 #define BOLEX_MODE_SQUARE   2
@@ -240,21 +241,25 @@ static int bolex_blanking(int tb, int angle, int factor_x1000)
 #define BOLEX_MODE_976      5
 #define BOLEX_MODE_976_166  6
 #define BOLEX_MODE_SENA     7
-#define BOLEX_MODES         8
+#define BOLEX_MODE_166_16   8
+#define BOLEX_MODE_694_166  9
+#define BOLEX_MODES         10
 #define BOLEX_PATH_INFINITY 1       /* the window's path while recording (mlv_lite) */
 #define BOLEX_PATH_SQUARE   2
 /* + the frame recorded (width : height x 100, the full height of the readout; mlv_lite), and a
  * smaller window (its width, 0 = none) that travels an infinity sign inside the readout */
-struct bolex_mode { const char * name; int readout; int timer_a; int timer_b_idle; int timer_b_min; int fps_min; int fps_max; int angle; int play_fps; int sena; int aspect_x100; int window_x; int test; int path; };
+struct bolex_mode { const char * name; int readout; int timer_a; int timer_b_idle; int timer_b_min; int fps_min; int fps_max; int angle; int play_fps; int sena; int aspect_x100; int window_x; int test; int path; int bits; };
 static const struct bolex_mode bolex_modes[BOLEX_MODES] = {
-    { "1620p",     BOLEX_RO_1620, 0x279, 0x838, 0x7E2, 20000, 25000, 133, 24, 0, 133, 0, 0, 0 }, /* 2160x1620; 23.976 idle, 25 the most the LCD shows */
-    { "976p INF",  BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 1024, 0, BOLEX_PATH_INFINITY }, /* 1024x768 travelling an infinity sign */
-    { "2.8K QUAD",  BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 166, 1600, 0, BOLEX_PATH_SQUARE }, /* 1600x964 travelling a rectangle */
-    { "2.8K 1.66", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 166, 0, 0, 0 }, /* 2032x1224 of 2880x1226; 23.99 idle, 25 its most */
-    { "2.8K 1.85", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 185, 0, 0, 0 }, /* 2256x1220 of 2880x1226 */
-    { "976p",      BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 0, 0, 0 }, /* 1296x972 of 1736x976 (3x3); 46.8 is its most */
-    { "976p 1.66", BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 166, 0, 0, 0 }, /* 1616x974 of 1736x976 */
-    { "SENA",      BOLEX_RO_28K,  0x325, 3308,  0x633,  4000, 12000, 360, 12, 1, 133, 0, 0, 0 }, /* 1632x1224 of 2.8K; 12 idle; 4 / 6 / 8 / 12 */
+    { "1620p",     BOLEX_RO_1620, 0x279, 0x838, 0x7E2, 20000, 25000, 133, 24, 0, 133, 0, 0, 0, 14 }, /* 2160x1620; 23.976 idle, 25 the most the LCD shows */
+    { "976p INF",  BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 1024, 0, BOLEX_PATH_INFINITY, 14 }, /* 1024x768 travelling an infinity sign */
+    { "2.8K QUAD",  BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 166, 1600, 0, BOLEX_PATH_SQUARE, 16 }, /* 1600x964 travelling a rectangle */
+    { "2.8K 1.66", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 166, 0, 0, 0, 14 }, /* 2032x1224 of 2880x1226; 23.99 idle, 25 its most */
+    { "2.8K 1.85", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 185, 0, 0, 0, 14 }, /* 2256x1220 of 2880x1226 */
+    { "976p",      BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 0, 0, 0, 14 }, /* 1296x972 of 1736x976 (3x3); 46.8 is its most */
+    { "976p 1.66", BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 166, 0, 0, 0, 14 }, /* 1616x974 of 1736x976 */
+    { "SENA",      BOLEX_RO_28K,  0x325, 3308,  0x633,  4000, 12000, 360, 12, 1, 133, 0, 0, 0, 14 }, /* 1632x1224 of 2.8K; 12 idle; 4 / 6 / 8 / 12 */
+    { "2.8K 1.66 16", BOLEX_RO_28K, 0x325, 2646, 2480, 14000, 16000, 133, 24, 0, 166, 0, 0, 0, 16 }, /* 2032x1224 16-bit: ~5 MB a frame, so 14 - 16 fps */
+    { "60P 1.66",  BOLEX_RO_694,  0x207, 0x401, 0x401, 54000, 59970, 133, 24, 0, 166, 0, 0, 0, 14 }, /* 1152x694 of 1736x694 (3x3); 60 is its most */
 };
 
 /* Sensor test (the eighth mode, last; camera test of "make the infinity fluid"): the window the
@@ -283,8 +288,8 @@ static const int sena_fps[] = { 4, 6, 8, 12 };
 /* the modes INFO twice goes through, in order; the first at every power on (not saved).  The
  * others stay in bolex_modes, out of the cycle (camera test: "keep only QUAD, 1.66, 976p 1.66,
  * Sena") */
-static const int bolex_cycle[] = { BOLEX_MODE_SQUARE, BOLEX_MODE_166, BOLEX_MODE_976_166, BOLEX_MODE_SENA };
-static int bolex_mode = BOLEX_MODE_SQUARE;
+static const int bolex_cycle[] = { BOLEX_MODE_166_16, BOLEX_MODE_166, BOLEX_MODE_976_166, BOLEX_MODE_694_166, BOLEX_MODE_SENA };
+static int bolex_mode = BOLEX_MODE_166_16;
 
 /* the mode after m on INFO twice (bolex_cycle) */
 static int bolex_next_mode(int m)
@@ -2765,6 +2770,10 @@ static inline uint32_t reg_override_3X3(uint32_t reg, uint32_t old_val)
                 RAW_V         = 0x2D2 + reg_height;
                 TimerB        = 0x401;
                 TimerA        = 0x207;
+
+                /* Bolex 60P: the speed of the moment (bolex_speed_task) */
+                if (bolex_fmt && bolex_modes[bolex_mode].readout == BOLEX_RO_694 && bolex_timer_b_live)
+                    TimerB    = bolex_timer_b_live;
             }
             
             
@@ -4968,6 +4977,15 @@ static void slim_crop_apply_bit_depth(void)
 /* Expected RAW WxH for EOS M (from crop_rec help / reg_override). */
 static void slim_crop_expected_res(int *w, int *h)
 {
+    /* Bolex 60P: the 2.39 slot read as 2.50:1 (crop_preset_fps_reduce 0), which the slim menu
+     * itself maps to 3:2 */
+    if (bolex_fmt && bolex_modes[bolex_mode].readout == BOLEX_RO_694)
+    {
+        *w = 1736;
+        *h = 694;
+        return;
+    }
+
     *w = 1376;
     *h = 2322; /* default Higher 1x3 16:9 */
 
@@ -7078,7 +7096,10 @@ static void slim_cover_hold_and_release(int hold_ms)
  * Then: only 2.8K QUAD (first, at power on), 2.8K 1.66, 976p 1.66 and SENA on INFO twice
  * (bolex_cycle), and no cuts at the start and end of a take (mlv_lite).
  * Then QUAD 16-bit uncompressed (mlv_lite BOLEX16): the window can move 2 pixels at a time,
- * so 2 a frame across (4 times slower), 2 lines a frame down, rounded corners.)
+ * so 2 a frame across (4 times slower), 2 lines a frame down, rounded corners.
+ * Then QUAD out; 2.8K 1.66 16 (first: the whole 1.66 frame, 16-bit uncompressed - the user liked
+ * the white noise it showed - at 14-16 fps for the card) and 60P 1.66 after 976p 1.66 (the 3x3
+ * readout of 694 lines, dannephoto's fastest: 1152x694, 54-60 fps, played at 24).)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -7167,6 +7188,7 @@ static int bolex_mode_active(void)
         case BOLEX_RO_1620: return crop_preset == CROP_PRESET_1X1 && CROP_1620p;
         case BOLEX_RO_28K:  return crop_preset == CROP_PRESET_1X1 && CROP_2_8K;
         case BOLEX_RO_976:  return crop_preset == CROP_PRESET_3X3 && High_FPS && AR_16_9;
+        case BOLEX_RO_694:  return crop_preset == CROP_PRESET_3X3 && High_FPS && AR_2_39_1 && crop_preset_fps_reduce == 0;
     }
     return 0;
 }
@@ -7310,6 +7332,12 @@ int bolex_infinity()
     return bolex_fmt ? bolex_modes[bolex_mode].window_x : 0;
 }
 
+/* used by mlv_lite: the mode records 16-bit uncompressed */
+int bolex_bits16()
+{
+    return bolex_fmt && bolex_modes[bolex_mode].bits == 16;
+}
+
 /* used by mlv_lite: the travelling window's path (BOLEX_PATH_..., 0 = none) */
 int bolex_path()
 {
@@ -7345,11 +7373,15 @@ static void bolex_fixed_settings(void)
         return;
 
     /* the readout of the mode, slim menu in step */
-    if (bolex_modes[bolex_mode].readout == BOLEX_RO_976)
+    if (bolex_modes[bolex_mode].readout == BOLEX_RO_976 || bolex_modes[bolex_mode].readout == BOLEX_RO_694)
     {
-        /* dannephoto's 976p: 3x3 High FPS 16:9, 1736x976 */
+        /* dannephoto's 976p: 3x3 High FPS 16:9, 1736x976; or its fastest, "2.50:1" (the 2.39
+         * slot with the full High FPS timers), 1736x694 at 60 */
+        int r694 = bolex_modes[bolex_mode].readout == BOLEX_RO_694;
         crop_preset_3x3_res_menu = 0;   /* High FPS */
-        crop_preset_ar_menu = 0;        /* 16:9 */
+        crop_preset_ar_menu = r694 ? 4 : 0;
+        if (r694)
+            crop_preset_fps_reduce = 0;
         crop_preset_fps_menu = 2;       /* 30 (no 23.976 snapping); the Bolex speed replaces it */
         slim_mode_ui = 2;               /* 3x3 */
         if (crop_preset_index != 3)
@@ -7632,7 +7664,7 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
         exp_us > 0 ? (1000000 + exp_us / 2) / exp_us : 0,
         angle,
         lens_info.iso,
-        bolex_modes[bolex_mode].path == BOLEX_PATH_SQUARE ? 16 : 14);
+        bolex_modes[bolex_mode].bits);
 }
 
 static struct lvinfo_item bolex_info_items[] = {

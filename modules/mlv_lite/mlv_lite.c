@@ -236,7 +236,7 @@ static CONFIG_INT("raw.output_format", output_format, 3);
 #define OUTPUT_AUTO_BIT_LOSSLESS 5
 /* Bolex 2.8K QUAD: 16-bit uncompressed (crop_rec bolex_path 2): one pixel = 2 bytes, so the
  * travelling window can sit on any even column, not only every 8th (14-bit packing) */
-#define BOLEX16 (bolex_format() && bolex_path() == 2)
+#define BOLEX16 (bolex_format() && bolex_bits16())
 #define OUTPUT_COMPRESSION ((output_format>2) && !BOLEX16)
 
 int which_output_format()

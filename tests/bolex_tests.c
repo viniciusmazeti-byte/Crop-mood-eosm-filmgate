@@ -189,10 +189,17 @@ int main(void)
         CHECK(bolex_trim_count(times, 10, 1000) == 10, "short take");
         CHECK(BOLEX_TRIM_MS == 0 && BOLEX_HEAD_MS == 0, "no cuts at the ends");
         /* INFO twice: QUAD (at power on) -> 1.66 -> 976p 1.66 -> SENA -> QUAD */
-        CHECK(bolex_mode == BOLEX_MODE_SQUARE && COUNT(bolex_cycle) == 4, "start mode / cycle");
-        CHECK(bolex_next_mode(BOLEX_MODE_SQUARE) == BOLEX_MODE_166 && bolex_next_mode(BOLEX_MODE_166) == BOLEX_MODE_976_166 &&
-              bolex_next_mode(BOLEX_MODE_976_166) == BOLEX_MODE_SENA && bolex_next_mode(BOLEX_MODE_SENA) == BOLEX_MODE_SQUARE &&
-              bolex_next_mode(BOLEX_MODE_1620) == BOLEX_MODE_SQUARE, "cycle order");
+        CHECK(bolex_mode == BOLEX_MODE_166_16 && COUNT(bolex_cycle) == 5, "start mode / cycle");
+        CHECK(bolex_next_mode(BOLEX_MODE_166_16) == BOLEX_MODE_166 && bolex_next_mode(BOLEX_MODE_166) == BOLEX_MODE_976_166 &&
+              bolex_next_mode(BOLEX_MODE_976_166) == BOLEX_MODE_694_166 && bolex_next_mode(BOLEX_MODE_694_166) == BOLEX_MODE_SENA &&
+              bolex_next_mode(BOLEX_MODE_SENA) == BOLEX_MODE_166_16 && bolex_next_mode(BOLEX_MODE_SQUARE) == BOLEX_MODE_166_16, "cycle order");
+        /* the 16-bit 1.66 frame: 2032x1224 x 2 bytes at its fastest within ~80 MB/s; 60P its fastest 60 */
+        const struct bolex_mode * m16 = &bolex_modes[BOLEX_MODE_166_16], * m60 = &bolex_modes[BOLEX_MODE_694_166];
+        double mbs = 2032.0 * 1224 * 2 * m16->fps_max / 1000 / 1e6;
+        printf("2.8K 1.66 16: %.0f MB/s at %d fps; 60P: %.2f fps at its fastest\n", mbs, m16->fps_max / 1000,
+               32e6 / ((m60->timer_a + 1.0) * (m60->timer_b_min + 1.0)));
+        CHECK(m16->bits == 16 && m16->aspect_x100 == 166 && !m16->window_x && !m16->path && mbs < 81, "16-bit mode %.0f MB/s", mbs);
+        CHECK(m60->readout == BOLEX_RO_694 && m60->aspect_x100 == 166 && m60->bits == 14 && m60->play_fps == 24, "60P mode");
     }
 
     /* intermittency per frame: within the ranges, the weave smooth (small steps) */
@@ -308,7 +315,7 @@ int main(void)
     for (int mi = 0; mi < BOLEX_MODES; mi++)
     {
         const struct bolex_mode * m = &bolex_modes[mi];
-        int max_y = m->readout == BOLEX_RO_1620 ? 1620 : m->readout == BOLEX_RO_28K ? 1226 : 976;
+        int max_y = m->readout == BOLEX_RO_1620 ? 1620 : m->readout == BOLEX_RO_28K ? 1226 : m->readout == BOLEX_RO_694 ? 694 : 976;
         int max_x = m->readout == BOLEX_RO_1620 ? 2160 : m->readout == BOLEX_RO_28K ? 2880 : 1736;
         int num = m->aspect_x100 == 133 ? 4 : m->aspect_x100, den = m->aspect_x100 == 133 ? 3 : 100;
         int w = MIN(max_y * num / den, max_x) & ~15;
