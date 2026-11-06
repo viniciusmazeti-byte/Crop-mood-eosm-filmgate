@@ -257,17 +257,20 @@ static const struct bolex_mode bolex_modes[BOLEX_MODES] = {
 
 /* Sensor test (the eighth mode, last; camera test of "make the infinity fluid"): the window the
  * crop cuts can only sit on 8-pixel steps, so try moving the sensor's own readout instead.
- * bolex_sensor_delta is added to CMOS[7] (the 976p readout's horizontal position, 0x802) -
+ * Round 1: +1 on CMOS[7] (0x802) moved the 976p picture 40 lines UP, live while recording
+ * (so Canon rewrites the sensor's registers during a take) - vertical and coarse.  Round 2:
+ * bolex_sensor_delta is added to CMOS[2] (horizontal position / binning, crop_rec's menu says) -
  * how far one unit moves the picture, and whether Canon writes CMOS registers while recording
  * (bolex_cmos_writes) so it could change frame by frame, is what the test finds out.
  * Not recording: Up / Down change it (Live View rebuilt).  Recording: +1 every
  * BOLEX_TEST_STEP_MS from there.  No flicker, no drops, the window still. */
 #define BOLEX_TEST_STEP_MS  2000
-#define BOLEX_TEST_MIN      (-2)        /* CMOS[7]'s low field stays in 0 .. 63 */
+#define BOLEX_TEST_MIN      (-8)
 #define BOLEX_TEST_MAX      40
 static volatile int bolex_sensor_delta = 0;
 static volatile int bolex_cmos_writes = 0;  /* CMOS register lists Canon wrote (cmos_hook) */
 static int bolex_cmos_writes0 = 0;          /* ... when the take started */
+static volatile int bolex_cmos2_seen = -1;  /* CMOS[2] as Canon writes it (-1: not in its lists) */
 static int bolex_test_base = 0;             /* the value set by hand, back to it after a take */
 static volatile int bolex_test_refresh = 0; /* Live View to rebuild (bolex_step) */
 
@@ -1261,7 +1264,7 @@ static void FAST cmos_hook(uint32_t* regs, uint32_t* stack, uint32_t pc)
             case CROP_PRESET_3X3:
                 if (High_FPS)
                 {
-                    if (AR_16_9)   cmos_new[7] = 0x802 + ((bolex_fmt && bolex_modes[bolex_mode].test) ? bolex_sensor_delta : 0);
+                    if (AR_16_9)   cmos_new[7] = 0x802;
                     if (AR_2_1    || 
                         AR_2_20_1) cmos_new[7] = 0x804;
                     if (AR_2_35_1 ||
@@ -1299,6 +1302,14 @@ static void FAST cmos_hook(uint32_t* regs, uint32_t* stack, uint32_t pc)
         {
             *copy_ptr = (reg << 12) | cmos_new[reg];
             dbg_printf("CMOS[%x] = %x\n", reg, cmos_new[reg]);
+        }
+
+        /* Bolex sensor test, round 2: CMOS[2] (the horizontal position, per crop_rec's menu)
+         * as Canon writes it, plus the test offset */
+        if (reg == 2 && bolex_fmt && bolex_modes[bolex_mode].test)
+        {
+            bolex_cmos2_seen = *data_buf & 0xFFF;
+            *copy_ptr = (2 << 12) | ((bolex_cmos2_seen + bolex_sensor_delta) & 0xFFF);
         }
 
         data_buf++;
@@ -7408,7 +7419,7 @@ static void bolex_step(void)
                 bolex_test_base = COERCE(bolex_test_base + (clicks > 0 ? 1 : -1), BOLEX_TEST_MIN, BOLEX_TEST_MAX);
                 bolex_sensor_delta = bolex_test_base;
                 bolex_test_refresh = 1;
-                NotifyBox(1500, "SENSOR %s%d (CMOS[7] %03X)", bolex_test_base >= 0 ? "+" : "", bolex_test_base, 0x802 + bolex_test_base);
+                NotifyBox(1500, "SENSOR %s%d", bolex_test_base >= 0 ? "+" : "", bolex_test_base);
             }
         }
         else
@@ -7571,8 +7582,13 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
 
     if (bolex_modes[bolex_mode].test)
     {
-        snprintf(buffer, 64, "SENSOR %s%d (CMOS[7] %03X)  CIMA/BAIXO  %d.%03d FPS  ISO %d",
-            bolex_sensor_delta >= 0 ? "+" : "", bolex_sensor_delta, 0x802 + bolex_sensor_delta, fps / 1000, fps % 1000, lens_info.iso);
+        if (bolex_cmos2_seen < 0)
+            snprintf(buffer, 64, "SENSOR %s%d  CMOS[2] ausente  CIMA/BAIXO  %d.%03d FPS",
+                bolex_sensor_delta >= 0 ? "+" : "", bolex_sensor_delta, fps / 1000, fps % 1000);
+        else
+            snprintf(buffer, 64, "SENSOR %s%d  CMOS[2] %03X > %03X  CIMA/BAIXO  %d.%03d FPS",
+                bolex_sensor_delta >= 0 ? "+" : "", bolex_sensor_delta, bolex_cmos2_seen,
+                (bolex_cmos2_seen + bolex_sensor_delta) & 0xFFF, fps / 1000, fps % 1000);
         item->color_fg = COLOR_CYAN;
         return;
     }

@@ -625,7 +625,7 @@ static void bolex_write_intermittency(const char * mlv_name, uint32_t seed, int 
         bolex_film_fps_x100() / 100, bolex_film_fps_x100() % 100, bolex_filmed, bolex_film_t1 - bolex_film_t0, bolex_play_fps());
     for (int k = 0; k < bolex_test_log_n && len < (int) sizeof(buf) - 80; k++)
         len += snprintf(buf + len, sizeof(buf) - len,
-            "# sensor test: from frame %d, CMOS[7] offset %d (Canon CMOS lists written so far: %d)\n",
+            "# sensor test: from frame %d, CMOS[2] offset %d (Canon CMOS lists written so far: %d)\n",
             bolex_test_log[k].frame, bolex_test_log[k].delta, bolex_test_log[k].writes);
     if (bolex_take_test)
         len += snprintf(buf + len, sizeof(buf) - len, "# sensor test: CMOS lists written by the end: %d\n", bolex_test_writes());
