@@ -85,9 +85,13 @@ int raw_overlay_calibration_ready(void)
 
 int raw_params_ready_for_rec(void)
 {
+    /* any bit depth mlv_lite records in: on the EOS M it is set before this check (14-bit only
+     * here kept the uncompressed 10 / 12 / 16-bit outputs from ever starting - "LiveView
+     * stabilizing"; the Bolex QUAD records 16-bit) */
+    int bpp = raw_info.bits_per_pixel;
     if (raw_info.width <= 0
         || raw_info.height <= 0
-        || raw_info.bits_per_pixel != 14
+        || (bpp != 10 && bpp != 12 && bpp != 14 && bpp != 16)
         || dirty
         || get_ms_clock() < next_retry_lv)
         return 0;
