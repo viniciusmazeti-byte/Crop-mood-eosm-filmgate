@@ -260,7 +260,7 @@ static const struct bolex_mode bolex_modes[BOLEX_MODES] = {
  * bolex_sensor_delta is added to CMOS[7] (the 976p readout's horizontal position, 0x802) -
  * how far one unit moves the picture, and whether Canon writes CMOS registers while recording
  * (bolex_cmos_writes) so it could change frame by frame, is what the test finds out.
- * Not recording: Left / Right change it (Live View rebuilt).  Recording: +1 every
+ * Not recording: Up / Down change it (Live View rebuilt).  Recording: +1 every
  * BOLEX_TEST_STEP_MS from there.  No flicker, no drops, the window still. */
 #define BOLEX_TEST_STEP_MS  2000
 #define BOLEX_TEST_MIN      (-2)        /* CMOS[7]'s low field stays in 0 .. 63 */
@@ -7395,15 +7395,17 @@ static void bolex_step(void)
         return;
 #endif
 
-    /* sensor test: Left / Right move the sensor's readout by one unit; elsewhere they do nothing */
+    /* sensor test: Up / Down (Left / Right do not reach ML on the EOS M in these views - camera
+     * test: "nothing happens") move the sensor's readout by one unit; no ISO change here */
     {
         extern int bolex_lr_clicks;
         if (bolex_modes[bolex_mode].test)
         {
-            if (bolex_lr_clicks)
+            int clicks = bolex_lr_clicks + bolex_iso_clicks;
+            bolex_lr_clicks = bolex_iso_clicks = 0;
+            if (clicks)
             {
-                bolex_test_base = COERCE(bolex_test_base + (bolex_lr_clicks > 0 ? 1 : -1), BOLEX_TEST_MIN, BOLEX_TEST_MAX);
-                bolex_lr_clicks = 0;
+                bolex_test_base = COERCE(bolex_test_base + (clicks > 0 ? 1 : -1), BOLEX_TEST_MIN, BOLEX_TEST_MAX);
                 bolex_sensor_delta = bolex_test_base;
                 bolex_test_refresh = 1;
                 NotifyBox(1500, "SENSOR %s%d (CMOS[7] %03X)", bolex_test_base >= 0 ? "+" : "", bolex_test_base, 0x802 + bolex_test_base);
@@ -7414,10 +7416,16 @@ static void bolex_step(void)
             bolex_lr_clicks = 0;
             bolex_test_base = bolex_sensor_delta = 0;
         }
-        if (bolex_test_refresh)
+        if (bolex_test_refresh && lv_dispsize == 5)
         {
+            /* Canon writes the sensor's registers when its view is set up: leave x5 and come
+             * back, so cmos_hook gives it the new CMOS[7] (the Live View guard alone does not
+             * rebuild a view that already looks right) */
             bolex_test_refresh = 0;
-            eosm_lv_guard_request();
+            gui_uilock(UILOCK_EVERYTHING);
+            set_zoom(1);
+            set_zoom(5);
+            gui_uilock(UILOCK_NONE);
             return;
         }
     }
@@ -7563,7 +7571,7 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
 
     if (bolex_modes[bolex_mode].test)
     {
-        snprintf(buffer, 64, "SENSOR %s%d (CMOS[7] %03X)  < >  %d.%03d FPS  ISO %d",
+        snprintf(buffer, 64, "SENSOR %s%d (CMOS[7] %03X)  CIMA/BAIXO  %d.%03d FPS  ISO %d",
             bolex_sensor_delta >= 0 ? "+" : "", bolex_sensor_delta, 0x802 + bolex_sensor_delta, fps / 1000, fps % 1000, lens_info.iso);
         item->color_fg = COLOR_CYAN;
         return;
