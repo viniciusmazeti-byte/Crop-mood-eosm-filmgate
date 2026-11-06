@@ -7021,7 +7021,8 @@ static void slim_cover_hold_and_release(int hold_ms)
  * And a seventh: 976p INF, a 1024x768 window (4:3) that, while recording, travels an infinity
  * sign inside the 1736x976 readout - the camera still, the frame moving (mlv_lite).  Then moved
  * to second, no dropped frames, the path on the 8-pixel grid the window really moves on, and
- * kept in Canon's x5 view (at x1 it ran at Canon's 24 fps).)
+ * kept in Canon's x5 view (at x1 it ran at Canon's 24 fps).  Then 5 times slower: a loop
+ * in 40 s on screen.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave

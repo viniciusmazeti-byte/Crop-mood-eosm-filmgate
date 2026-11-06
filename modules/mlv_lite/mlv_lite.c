@@ -2443,11 +2443,11 @@ static void show_buffer_status()
 
 /* Bolex 976p INF: while recording, the window travels an infinity sign (Gerono's lemniscate:
  * x = sin t, y = sin 2t) inside the readout, one loop every BOLEX_INF_FRAMES frames filmed -
- * 192 = 8 s on screen at 24.  It starts in the centre, going right and up.  Across, the window
+ * 960 = 40 s on screen at 24 (camera test: 192 was too fast, "5 times slower").  It starts in the centre, going right and up.  Across, the window
  * can only sit on an 8-pixel grid (the recorded crop is rounded to it: (skip_x + 7) & ~7), so
  * the path is put on that grid; down, on 2 lines (the Bayer pattern).  No frames are dropped in
  * this mode (each drop was a jump along the path). */
-#define BOLEX_INF_FRAMES    192
+#define BOLEX_INF_FRAMES    960
 
 /* sine x 1000 of t tenths of a degree (Bhaskara's approximation, within 0.2%) */
 static int bolex_sin_x1000(int t)
