@@ -182,12 +182,17 @@ int main(void)
         int times[100];
         for (int k = 0; k < 100; k++)
             times[k] = 100000 - k * 40;
-        CHECK(bolex_trim_count(times, 100, BOLEX_TRIM_MS) == 25, "trim %d", bolex_trim_count(times, 100, BOLEX_TRIM_MS));
+        CHECK(bolex_trim_count(times, 100, 1000) == 25, "trim %d", bolex_trim_count(times, 100, 1000));
         for (int k = 0; k < 100; k++)
             times[k] = 100000 - k * 50;     /* 20 fps */
-        CHECK(bolex_trim_count(times, 100, BOLEX_TRIM_MS) == 20, "trim 20 fps %d", bolex_trim_count(times, 100, BOLEX_TRIM_MS));
-        CHECK(bolex_trim_count(times, 10, BOLEX_TRIM_MS) == 10, "short take");
-        CHECK(BOLEX_TRIM_MS == 1000 && BOLEX_HEAD_MS == 1000, "1 s at each end");
+        CHECK(bolex_trim_count(times, 100, 1000) == 20, "trim 20 fps %d", bolex_trim_count(times, 100, 1000));
+        CHECK(bolex_trim_count(times, 10, 1000) == 10, "short take");
+        CHECK(BOLEX_TRIM_MS == 0 && BOLEX_HEAD_MS == 0, "no cuts at the ends");
+        /* INFO twice: QUAD (at power on) -> 1.66 -> 976p 1.66 -> SENA -> QUAD */
+        CHECK(bolex_mode == BOLEX_MODE_SQUARE && COUNT(bolex_cycle) == 4, "start mode / cycle");
+        CHECK(bolex_next_mode(BOLEX_MODE_SQUARE) == BOLEX_MODE_166 && bolex_next_mode(BOLEX_MODE_166) == BOLEX_MODE_976_166 &&
+              bolex_next_mode(BOLEX_MODE_976_166) == BOLEX_MODE_SENA && bolex_next_mode(BOLEX_MODE_SENA) == BOLEX_MODE_SQUARE &&
+              bolex_next_mode(BOLEX_MODE_1620) == BOLEX_MODE_SQUARE, "cycle order");
     }
 
     /* intermittency per frame: within the ranges, the weave smooth (small steps) */

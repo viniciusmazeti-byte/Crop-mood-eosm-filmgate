@@ -451,8 +451,8 @@ static GUARDED_BY(RawRecTask)   int64_t written_chunk[MAX_WRITER_THREADS] = {0};
  * and the frame count in the file header is lowered.  Counted by time, not frames, since the
  * speed wanders.  A take shorter than that is deleted.  (The countdown before REC is off.) */
 #define BOLEX_REC_DELAY_MS  0       /* off (was 3000) */
-#define BOLEX_HEAD_MS       1000    /* the first second, not recorded */
-#define BOLEX_TRIM_MS       1000    /* the last second, cut */
+#define BOLEX_HEAD_MS       0       /* off (was 1000: the first second, not recorded) */
+#define BOLEX_TRIM_MS       0       /* off (was 1000: the last second, cut) */
 #define BOLEX_TAIL          192     /* more than BOLEX_TRIM_MS at any Bolex frame rate */
 #define BOLEX_CAP           512     /* filming times kept, by frame number (frames still in memory) */
 static int bolex_rec_at = 0;        /* clock time the countdown ends, 0 = none */

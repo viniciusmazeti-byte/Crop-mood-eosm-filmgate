@@ -68,6 +68,9 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "struct bolex_mode {"
   python3 tests/extract.py $CR block    "static const struct bolex_mode bolex_modes[BOLEX_MODES]"
   python3 tests/extract.py $CR line     "static const int sena_fps[]"
+  python3 tests/extract.py $CR line     "static const int bolex_cycle[]"
+  python3 tests/extract.py $CR line     "static int bolex_mode = "
+  python3 tests/extract.py $CR function bolex_next_mode
   python3 tests/extract.py $CR line     "#define SENA_HOLD_MIN_MS"
   python3 tests/extract.py $CR line     "#define SENA_HOLD_MAX_MS"
   python3 tests/extract.py $CR line     "#define BOLEX_WANDER_HOLD_MIN_MS"

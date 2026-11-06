@@ -280,7 +280,20 @@ static volatile int bolex_test_refresh = 0; /* Live View to rebuild (bolex_step)
 static const int sena_fps[] = { 4, 6, 8, 12 };
 #define SENA_HOLD_MIN_MS    500
 #define SENA_HOLD_MAX_MS    2000
-static int bolex_mode = BOLEX_MODE_1620;    /* not saved: 1620p at every power on */
+/* the modes INFO twice goes through, in order; the first at every power on (not saved).  The
+ * others stay in bolex_modes, out of the cycle (camera test: "keep only QUAD, 1.66, 976p 1.66,
+ * Sena") */
+static const int bolex_cycle[] = { BOLEX_MODE_SQUARE, BOLEX_MODE_166, BOLEX_MODE_976_166, BOLEX_MODE_SENA };
+static int bolex_mode = BOLEX_MODE_SQUARE;
+
+/* the mode after m on INFO twice (bolex_cycle) */
+static int bolex_next_mode(int m)
+{
+    for (int i = 0; i < (int) COUNT(bolex_cycle); i++)
+        if (bolex_cycle[i] == m)
+            return bolex_cycle[(i + 1) % COUNT(bolex_cycle)];
+    return bolex_cycle[0];
+}
 
 
 /* customized buttons variables
@@ -7061,7 +7074,9 @@ static void slim_cover_hold_and_release(int hold_ms)
  * gone; its code stays, unused.
  * Then 2.8K QUAD, third: a 1.66:1 window of 1600x964 in the 2.8K readout travelling a
  * rectangle at constant speed - straight lines need no slowing down, so no uneven steps:
- * 8 pixels a frame across (the crop's smallest step), 2 lines a frame down / up.)
+ * 8 pixels a frame across (the crop's smallest step), 2 lines a frame down / up.
+ * Then: only 2.8K QUAD (first, at power on), 2.8K 1.66, 976p 1.66 and SENA on INFO twice
+ * (bolex_cycle), and no cuts at the start and end of a take (mlv_lite).)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -7395,7 +7410,7 @@ static void bolex_info_pressed(void)
     if (last && now - last < 500)
     {
         last = 0;
-        bolex_mode = (bolex_mode + 1) % BOLEX_MODES;
+        bolex_mode = bolex_next_mode(bolex_mode);
         bolex_timer_b_live = 0;         /* the core leaves Timer B alone until the new readout runs */
         bolex_fixed_settings();
         eosm_lv_guard_request();        /* rebuild Live View: crop_rec applies the new readout */
