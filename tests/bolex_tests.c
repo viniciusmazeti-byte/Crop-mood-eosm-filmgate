@@ -232,32 +232,38 @@ int main(void)
     /* 976p 3x3 readout: 976 picture lines, square pixels, the centre 4:3 recorded */
     check_43("4:3 1620p", 1620, 0);
 
-    /* 976p INF: a 1024x768 window inside the 1736x976 readout, travelling an infinity sign */
+    /* 976p INF: second on INFO; a 1024x768 window inside the 1736x976 readout, travelling an
+     * infinity sign on the 8-pixel grid the crop really moves on */
     {
         const struct bolex_mode * m = &bolex_modes[BOLEX_MODE_INF];
-        CHECK(m->readout == BOLEX_RO_976 && m->window_x == 1024 && m->aspect_x100 == 133 && BOLEX_MODE_INF == BOLEX_MODES - 1,
-              "INF mode, last");
+        CHECK(m->readout == BOLEX_RO_976 && m->window_x == 1024 && m->aspect_x100 == 133 && BOLEX_MODE_INF == 1,
+              "INF mode, second");
+        CHECK(m->fps_min == 42000 && m->fps_max == 46800, "INF speeds");
         for (int t = 0; t < 3600; t++)
             CHECK(fabs(bolex_sin_x1000(t) - 1000 * sin(t * M_PI / 1800)) <= 2.5, "sin %d: %d", t, bolex_sin_x1000(t));
         int res_x = 1024, res_y = calc_res_y(res_x, 976, 4, 3, 1.0f);
-        int xmax = ((1736 - res_x) / 2) & ~3, ymax = ((976 - res_y) / 2) & ~1;
-        int px = 0, py = 0, maxdx = 0, maxdy = 0, xlo = 0, xhi = 0, ylo = 0, yhi = 0, still = 0;
+        int room_x = 1736 - res_x, room_y = 976 - res_y;
+        int left_margin = 72;                    /* any multiple of 8 */
+        int px = 0, py = 0, maxdx = 0, maxdy = 0, xlo = 9999, xhi = 0, ylo = 9999, yhi = 0, holds = 0;
         for (int n = 0; n < 3 * BOLEX_INF_FRAMES; n++)
         {
             int x, y;
-            bolex_infinity_offsets(n, xmax, ymax, &x, &y);
-            CHECK(x % 4 == 0 && y % 2 == 0 && ABS(x) <= xmax && ABS(y) <= ymax, "offset %d %d", x, y);
-            if (n) { maxdx = MAX(maxdx, ABS(x - px)); maxdy = MAX(maxdy, ABS(y - py)); still += x == px && y == py; }
+            bolex_infinity_pos(n, room_x, room_y, &x, &y);
+            /* what mlv_lite records: skip_x = margin + centre + offset, crop = (skip_x + 7) & ~7 */
+            int skip_x = left_margin + room_x / 2 + (x - room_x / 2);
+            int crop_x = (skip_x + 7) & ~7;
+            CHECK(crop_x == left_margin + x, "x %d not on the grid", x);
+            CHECK(x % 8 == 0 && y % 2 == 0 && x >= 0 && x <= room_x && y >= 0 && y <= room_y, "pos %d %d", x, y);
+            if (n) { maxdx = MAX(maxdx, ABS(x - px)); maxdy = MAX(maxdy, ABS(y - py)); holds += x == px; }
             xlo = MIN(xlo, x); xhi = MAX(xhi, x); ylo = MIN(ylo, y); yhi = MAX(yhi, y);
             px = x; py = y;
-            if (n == 0) CHECK(x == 0 && y == 0, "starts in the centre");
-            if (n == BOLEX_INF_FRAMES / 2) CHECK(ABS(x) <= 4 && ABS(y) <= 2, "crosses the centre half way: %d %d", x, y);
+            if (n == 0) CHECK(ABS(x - room_x / 2) <= 4 && ABS(y - room_y / 2) <= 1, "starts in the centre %d %d", x, y);
         }
-        printf("infinity: %dx%d window, path x %d..%d y %d..%d, largest step %d px / %d lines per frame, %d frames still (of %d), loop %.1f s at 24\n",
-               res_x, res_y, xlo, xhi, ylo, yhi, maxdx, maxdy, still, 3 * BOLEX_INF_FRAMES, BOLEX_INF_FRAMES / 24.0);
+        printf("infinity: %dx%d window, x %d..%d, y %d..%d, largest step %d px / %d lines, %d%% frames still across, loop %.1f s at 24\n",
+               res_x, res_y, xlo, xhi, ylo, yhi, maxdx, maxdy, holds * 100 / (3 * BOLEX_INF_FRAMES), BOLEX_INF_FRAMES / 24.0);
         CHECK(res_y == 768, "window height %d", res_y);
-        CHECK(xhi >= xmax - 4 && xlo <= -xmax + 4 && yhi >= ymax - 2 && ylo <= -ymax + 2, "the whole room used");
-        CHECK(maxdx <= 12 && maxdy <= 6, "steps %d %d", maxdx, maxdy);
+        CHECK(xlo == 0 && xhi == (room_x & ~7) && ylo <= 2 && yhi >= room_y - 2, "the whole room used");
+        CHECK(maxdx <= 16 && maxdy <= 8, "steps %d %d", maxdx, maxdy);
     }
 
     /* each mode's recorded frame, as mlv_lite works it out from the readout height */

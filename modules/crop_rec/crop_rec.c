@@ -233,24 +233,24 @@ static int bolex_blanking(int tb, int angle, int factor_x1000)
 #define BOLEX_RO_28K        1
 #define BOLEX_RO_976        2
 #define BOLEX_MODE_1620     0
-#define BOLEX_MODE_166      1
-#define BOLEX_MODE_185      2
-#define BOLEX_MODE_976      3
-#define BOLEX_MODE_976_166  4
-#define BOLEX_MODE_SENA     5
-#define BOLEX_MODE_INF      6
+#define BOLEX_MODE_INF      1
+#define BOLEX_MODE_166      2
+#define BOLEX_MODE_185      3
+#define BOLEX_MODE_976      4
+#define BOLEX_MODE_976_166  5
+#define BOLEX_MODE_SENA     6
 #define BOLEX_MODES         7
 /* + the frame recorded (width : height x 100, the full height of the readout; mlv_lite), and a
  * smaller window (its width, 0 = none) that travels an infinity sign inside the readout */
 struct bolex_mode { const char * name; int readout; int timer_a; int timer_b_idle; int timer_b_min; int fps_min; int fps_max; int angle; int play_fps; int sena; int aspect_x100; int window_x; };
 static const struct bolex_mode bolex_modes[BOLEX_MODES] = {
     { "1620p",     BOLEX_RO_1620, 0x279, 0x838, 0x7E2, 20000, 25000, 133, 24, 0, 133, 0 }, /* 2160x1620; 23.976 idle, 25 the most the LCD shows */
+    { "976p INF",  BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 1024 }, /* 1024x768 travelling an infinity sign */
     { "2.8K 1.66", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 166, 0 }, /* 2032x1224 of 2880x1226; 23.99 idle, 25 its most */
     { "2.8K 1.85", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 185, 0 }, /* 2256x1220 of 2880x1226 */
     { "976p",      BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 0 }, /* 1296x972 of 1736x976 (3x3); 46.8 is its most */
     { "976p 1.66", BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 166, 0 }, /* 1616x974 of 1736x976 */
     { "SENA",      BOLEX_RO_28K,  0x325, 3308,  0x633,  4000, 12000, 360, 12, 1, 133, 0 }, /* 1632x1224 of 2.8K; 12 idle; 4 / 6 / 8 / 12 */
-    { "976p INF",  BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 1024 }, /* 1024x768 travelling an infinity sign */
 };
 
 /* Sena: the speeds drawn while recording (fps), each held SENA_HOLD_MIN_MS .. MAX_MS */
@@ -7018,8 +7018,10 @@ static void slim_cover_hold_and_release(int hold_ms)
  * Then: the 2.8K Bolex (4:3, 1632x1224) replaced by two, 1.66:1 (2032x1224, In Praise of Love's
  * frame) and 1.85:1 (2256x1220) - wider and with more of the readout than 4:3.  Five modes.
  * Then a sixth, 976p 1.66:1: 1616x974, nearly the 976p readout's whole width, after 976p 4:3.
- * And a seventh, last: 976p INF, a 1024x768 window (4:3) that, while recording, travels an
- * infinity sign inside the 1736x976 readout - the camera still, the frame moving (mlv_lite).)
+ * And a seventh: 976p INF, a 1024x768 window (4:3) that, while recording, travels an infinity
+ * sign inside the 1736x976 readout - the camera still, the frame moving (mlv_lite).  Then moved
+ * to second, no dropped frames, the path on the 8-pixel grid the window really moves on, and
+ * kept in Canon's x5 view (at x1 it ran at Canon's 24 fps).)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -7101,8 +7103,8 @@ static int sena_next(uint32_t * seed, int cur)
 /* the readout Live View runs now is the one of bolex_mode (not half way through a switch) */
 static int bolex_mode_active(void)
 {
-    if (!patch_active)
-        return 0;
+    if (!patch_active || lv_dispsize != 5)
+        return 0;   /* crop_rec's readouts are Canon's x5 view (at x1: Canon's own 1080p) */
     switch (bolex_modes[bolex_mode].readout)
     {
         case BOLEX_RO_1620: return crop_preset == CROP_PRESET_1X1 && CROP_1620p;
@@ -7348,6 +7350,19 @@ static void bolex_step(void)
     if (eosm_lv_guard_busy)
         return;
 #endif
+
+    /* crop_rec's readouts exist only in Canon's x5 view.  At x1 Canon shows its own 1080p: on
+     * the EOS M that is 1736x976 at 23.976 fps - the size of the 976p readout, so it passes for
+     * it, only at 24 fps (camera test: "976p INF records at 24").  Back to x5 when found at x1. */
+    {
+        static int last_try = 0;
+        int now = get_ms_clock();
+        if (lv_dispsize == 1 && CROP_PRESET_MENU && now - last_try >= 1500)
+        {
+            last_try = now;
+            set_zoom(5);
+        }
+    }
 
     /* the one shutter, ~133 degrees (BOLEX_RAW_SHUTTER), held: set again if anything moves it.
      * The EOS M shutter lock (movtweaks.c) is told first.  If Canon will not take the half

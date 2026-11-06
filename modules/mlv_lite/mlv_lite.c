@@ -580,6 +580,21 @@ static int sena_kelvin(uint32_t seed, int frame)
     return SENA_KELVIN_MIN + (int)(x % (SENA_KELVIN_MAX - SENA_KELVIN_MIN + 1));
 }
 
+/* the take being recorded is a Sena one (bolex_sena() when it started) */
+static int bolex_take_sena = 0;
+/* ... an infinity one (976p INF: no dropped frames) */
+static int bolex_take_inf = 0;
+/* frames filmed in the take after its first second (kept or not), and when the first and the
+ * last of them came: the real speed, written in the .KEL */
+static int bolex_filmed = 0, bolex_film_t0 = 0, bolex_film_t1 = 0;
+
+/* the real speed the take was filmed at, fps x 100 (bolex_filmed: process_frame) */
+static int bolex_film_fps_x100(void)
+{
+    int ms = bolex_film_t1 - bolex_film_t0;
+    return (ms > 0 && bolex_filmed > 1) ? (int)((int64_t)(bolex_filmed - 1) * 100000 / ms) : 0;
+}
+
 /* write name.KEL next to the clip name.MLV: n frames */
 static void bolex_write_intermittency(const char * mlv_name, uint32_t seed, int n, int sena)
 {
@@ -598,7 +613,10 @@ static void bolex_write_intermittency(const char * mlv_name, uint32_t seed, int 
         "# %s per frame: frame kelvin ev dx dy, %d frames\n"
         "# develop the clip at %d K, then apply with tools/lab.py\n"
         "# size %dx%d\n"
-        "# seed %u\n", sena ? "Sena colour temperature" : "Bolex intermittency", n, BOLEX_KELVIN_BASE, res_x, res_y, (unsigned) seed);
+        "# seed %u\n"
+        "# filmed at %d.%02d fps (%d frames in %d ms), shown at %d fps\n",
+        sena ? "Sena colour temperature" : "Bolex intermittency", n, BOLEX_KELVIN_BASE, res_x, res_y, (unsigned) seed,
+        bolex_film_fps_x100() / 100, bolex_film_fps_x100() % 100, bolex_filmed, bolex_film_t1 - bolex_film_t0, bolex_play_fps());
     struct bolex_int v = { 0, 0, 0, 0 };
     for (int i = 0; i < n; i++)
     {
@@ -673,8 +691,6 @@ static int sena_drop_frame(uint32_t * seed, int * left)
     return 1;
 }
 
-/* the take being recorded is a Sena one (bolex_sena() when it started) */
-static int bolex_take_sena = 0;
 
 /* Bolex info line (crop_rec.c): milliseconds left before REC starts, 0 = no countdown */
 static void raw_start_stop();   /* below */
@@ -2427,10 +2443,11 @@ static void show_buffer_status()
 
 /* Bolex 976p INF: while recording, the window travels an infinity sign (Gerono's lemniscate:
  * x = sin t, y = sin 2t) inside the readout, one loop every BOLEX_INF_FRAMES frames filmed -
- * 288 = 12 s on screen at 24.  It starts in the centre, going right and up.  The window moves
- * by 4 pixels across (the 14-bit packing) and 2 lines down (the Bayer pattern).  Frames dropped
- * still count, so a drop is a jump along the path. */
-#define BOLEX_INF_FRAMES    288
+ * 192 = 8 s on screen at 24.  It starts in the centre, going right and up.  Across, the window
+ * can only sit on an 8-pixel grid (the recorded crop is rounded to it: (skip_x + 7) & ~7), so
+ * the path is put on that grid; down, on 2 lines (the Bayer pattern).  No frames are dropped in
+ * this mode (each drop was a jump along the path). */
+#define BOLEX_INF_FRAMES    192
 
 /* sine x 1000 of t tenths of a degree (Bhaskara's approximation, within 0.2%) */
 static int bolex_sin_x1000(int t)
@@ -2448,14 +2465,16 @@ static int bolex_sin_x1000(int t)
     return sign * (int)(4000LL * p / (4050000LL - p));
 }
 
-/* the window's offset from the centre at frame n, within +-xmax, +-ymax */
-static void bolex_infinity_offsets(int n, int xmax, int ymax, int * x, int * y)
+/* the window's left / top inside the readout at frame n: room_x, room_y = readout - window;
+ * x on the 8-pixel grid within 0 .. room_x, y even within 0 .. room_y; frame 0 in the centre */
+static void bolex_infinity_pos(int n, int room_x, int room_y, int * x, int * y)
 {
     int t = (int)((int64_t)(n % BOLEX_INF_FRAMES) * 3600 / BOLEX_INF_FRAMES);
-    int fx = xmax * bolex_sin_x1000(t) / 1000;
-    int fy = -ymax * bolex_sin_x1000(2 * t) / 1000;     /* up first (lines count down) */
-    *x = (fx >= 0 ? (fx + 2) : (fx - 2)) / 4 * 4;
-    *y = (fy >= 0 ? (fy + 1) : (fy - 1)) / 2 * 2;
+    int gx = room_x & ~7, gy = room_y & ~1;
+    int fx = gx * 500 + gx / 2 * bolex_sin_x1000(t);           /* x 1000 */
+    int fy = gy * 500 - gy / 2 * bolex_sin_x1000(2 * t);       /* up first (lines count down) */
+    *x = COERCE((fx + 4000) / 8000 * 8, 0, gx);
+    *y = COERCE((fy + 1000) / 2000 * 2, 0, gy);
 }
 
 static REQUIRES(LiveViewTask)
@@ -2465,9 +2484,11 @@ void bolex_infinity_update()
     int x = 0, y = 0;
     if (RAW_IS_RECORDING)
     {
-        int xmax = ((max_res_x - res_x) / 2) & ~3;
-        int ymax = ((max_res_y - res_y) / 2) & ~1;
-        bolex_infinity_offsets(n++, xmax, ymax, &x, &y);
+        /* offsets from the centred window (update_cropping_offsets adds (max - res) / 2) */
+        int px, py;
+        bolex_infinity_pos(n++, max_res_x - res_x, max_res_y - res_y, &px, &py);
+        x = px - (max_res_x - res_x) / 2;
+        y = py - (max_res_y - res_y) / 2;
     }
     else
         n = 0;
@@ -3892,6 +3913,13 @@ void process_frame(int next_fullsize_buffer_pos)
         if (now - bolex_take_t0 < BOLEX_HEAD_MS)
             return;
     }
+    if (bolex_format())
+    {
+        int now = get_ms_clock();
+        if (!bolex_filmed++)
+            bolex_film_t0 = now;
+        bolex_film_t1 = now;
+    }
 
     /* some modules may do some specific stuff right when we started recording */
     if (frame_count == 1)
@@ -3907,7 +3935,7 @@ void process_frame(int next_fullsize_buffer_pos)
     }
 
     /* Bolex: a few single frames dropped (never the first one of a take); Sena: ~2 in 5 */
-    if (bolex_format() && frame_count > 1 &&
+    if (bolex_format() && frame_count > 1 && !bolex_take_inf &&
         (bolex_take_sena ? sena_drop_frame(&sena_drop_seed, &sena_drop_left)
                          : bolex_drop_frame(&bolex_drop_seed, &bolex_drop_last)))
         return;
@@ -4461,6 +4489,8 @@ void raw_video_rec_task(uint32_t thread)
         bolex_drop_seed = bolex_int_seed ^ 0xD80Bu;
         bolex_drop_last = 0;
         bolex_take_sena = bolex_sena();
+        bolex_take_inf = bolex_infinity() != 0;
+        bolex_filmed = bolex_film_t0 = bolex_film_t1 = 0;
         sena_drop_seed = bolex_int_seed ^ 0x5E7Au;
         sena_drop_left = 0;
         buffer_full = 0;
