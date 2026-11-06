@@ -7076,7 +7076,9 @@ static void slim_cover_hold_and_release(int hold_ms)
  * rectangle at constant speed - straight lines need no slowing down, so no uneven steps:
  * 8 pixels a frame across (the crop's smallest step), 2 lines a frame down / up.
  * Then: only 2.8K QUAD (first, at power on), 2.8K 1.66, 976p 1.66 and SENA on INFO twice
- * (bolex_cycle), and no cuts at the start and end of a take (mlv_lite).)
+ * (bolex_cycle), and no cuts at the start and end of a take (mlv_lite).
+ * Then QUAD 16-bit uncompressed (mlv_lite BOLEX16): the window can move 2 pixels at a time,
+ * so 2 a frame across (4 times slower), 2 lines a frame down, rounded corners.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -7623,13 +7625,14 @@ static LVINFO_UPDATE_FUNC(bolex_info_update)
         return;
     }
 
-    snprintf(buffer, 64, "%s  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  14-BIT",
+    snprintf(buffer, 64, "%s  %d.%03d FPS > %d  1/%d %d" SYM_DEGREE "  ISO %d  %d-BIT",
         bolex_modes[bolex_mode].name,
         fps / 1000, fps % 1000,
         bolex_modes[bolex_mode].play_fps,
         exp_us > 0 ? (1000000 + exp_us / 2) / exp_us : 0,
         angle,
-        lens_info.iso);
+        lens_info.iso,
+        bolex_modes[bolex_mode].path == BOLEX_PATH_SQUARE ? 16 : 14);
 }
 
 static struct lvinfo_item bolex_info_items[] = {

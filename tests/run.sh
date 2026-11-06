@@ -109,8 +109,8 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_INF_FRAMES"
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_sin_x1000
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_infinity_pos
-  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_SQ_H"
-  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_SQ_V"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_SQ_SPEED"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_SQ_RADIUS"
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_square_pos
 } > "$OUT/bolex_mlv_snippets.h"
 

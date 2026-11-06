@@ -234,7 +234,10 @@ static CONFIG_INT("raw.output_format", output_format, 3);
 #define OUTPUT_14BIT_LOSSLESS 3
 #define OUTPUT_12BIT_LOSSLESS 4
 #define OUTPUT_AUTO_BIT_LOSSLESS 5
-#define OUTPUT_COMPRESSION (output_format>2)
+/* Bolex 2.8K QUAD: 16-bit uncompressed (crop_rec bolex_path 2): one pixel = 2 bytes, so the
+ * travelling window can sit on any even column, not only every 8th (14-bit packing) */
+#define BOLEX16 (bolex_format() && bolex_path() == 2)
+#define OUTPUT_COMPRESSION ((output_format>2) && !BOLEX16)
 
 int which_output_format()
 {
@@ -247,7 +250,7 @@ static const int bpp_container[] = { 14, 12, 10, 14, 14, 14, 14, 14, 14 };
 /* "fake" lower bit depths using digital gain (for lossless JPEG) */
 //static const int bpp_digi_gain[] = { 14, 14, 14, 14, 12, 11, 10,  9,  8 };
 
-#define BPP     bpp_container[output_format]
+#define BPP     (BOLEX16 ? 16 : bpp_container[output_format])
 #define BPP_D   (raw_digital_gain_ok() ? bpp_digital_gain() : 14)
 
 static int bpp_digital_gain()
@@ -2489,28 +2492,58 @@ static void bolex_infinity_pos(int n, int room_x, int room_y, int * x, int * y)
     *y = COERCE((fy + 1000) / 2000 * 2, 0, gy);
 }
 
-/* Bolex 2.8K QUAD: while recording, the window travels a rectangle inside the readout at
- * constant speed: from the top right corner down (BOLEX_SQ_V lines a frame), along the bottom
- * to the left (BOLEX_SQ_H pixels a frame: the crop's 8-pixel step, every frame - straight lines
- * at constant speed need no in-between steps), up, and back right along the top.  Positions
- * as bolex_infinity_pos. */
-#define BOLEX_SQ_H          8
-#define BOLEX_SQ_V          2
+/* Bolex 2.8K QUAD: while recording, the window travels a rectangle with rounded corners inside
+ * the readout at a constant BOLEX_SQ_SPEED pixels a frame along the path: from the top of the
+ * right side down, along the bottom to the left, up, and back right along the top; the corners
+ * are quarter circles of BOLEX_SQ_RADIUS, so the turn from one side to the next is gradual
+ * (camera test: "a jolt at each corner").  Recorded 16-bit (BOLEX16), the window sits on any
+ * even column: 2 pixels a frame across (4 times slower than the 8 of the 14-bit packing), 2
+ * lines a frame down / up.  Positions on the grid: across grid_x (2, or 8 at 14-bit), down 2. */
+#define BOLEX_SQ_SPEED      2
+#define BOLEX_SQ_RADIUS     64
 
-static void bolex_square_pos(int n, int room_x, int room_y, int * x, int * y)
+static void bolex_square_pos(int n, int room_x, int room_y, int grid_x, int * x, int * y)
 {
-    int gx = room_x & ~7, gy = room_y & ~1;
-    int down = (gy + BOLEX_SQ_V - 1) / BOLEX_SQ_V;     /* frames for each side */
-    int across = (gx + BOLEX_SQ_H - 1) / BOLEX_SQ_H;
-    int loop = 2 * (down + across);
-    int k = loop ? n % loop : 0;
-    if (k < down)                       { *x = gx; *y = MIN(k * BOLEX_SQ_V, gy); return; }
-    k -= down;
-    if (k < across)                     { *x = MAX(gx - k * BOLEX_SQ_H, 0); *y = gy; return; }
-    k -= across;
-    if (k < down)                       { *x = 0; *y = MAX(gy - k * BOLEX_SQ_V, 0); return; }
-    k -= down;
-    *x = MIN(k * BOLEX_SQ_H, gx); *y = 0;
+    int gx = room_x / grid_x * grid_x, gy = room_y & ~1;
+    int r = MIN(BOLEX_SQ_RADIUS, MIN(gx, gy) / 2);
+    int lx = gx - 2 * r, ly = gy - 2 * r;                       /* straight parts */
+    int arc = (int)(1571LL * r / 1000);                         /* a quarter circle, pi r / 2 */
+    int per = 2 * (lx + ly) + 4 * arc;
+    int s = per ? (int)((int64_t) n * BOLEX_SQ_SPEED % per) : 0; /* how far along, pixels */
+    int fx, fy;                                                 /* x 1000 */
+    static const int seg_cx[4] = { 1, 0, 0, 1 };                /* arc centres: 1 = right / bottom */
+    static const int seg_cy[4] = { 1, 1, 0, 0 };
+    int side = 0;
+    while (1)
+    {
+        /* the straight side: 0 right (down), 1 bottom (left), 2 left (up), 3 top (right) */
+        int len = (side & 1) ? lx : ly;
+        if (s < len)
+        {
+            switch (side)
+            {
+                case 0: fx = gx * 1000;     fy = (r + s) * 1000;      break;
+                case 1: fx = (gx - r - s) * 1000; fy = gy * 1000;     break;
+                case 2: fx = 0;             fy = (gy - r - s) * 1000; break;
+                default: fx = (r + s) * 1000; fy = 0;                break;
+            }
+            break;
+        }
+        s -= len;
+        /* then the quarter circle after it, turning 90 degrees */
+        if (s < arc)
+        {
+            int cx = seg_cx[side] ? gx - r : r, cy = seg_cy[side] ? gy - r : r;
+            int t = side * 900 + (int)((int64_t) s * 900 / MAX(arc, 1));  /* tenths of a degree */
+            fx = cx * 1000 + r * bolex_sin_x1000(t + 900);              /* r cos t */
+            fy = cy * 1000 + r * bolex_sin_x1000(t);                    /* r sin t */
+            break;
+        }
+        s -= arc;
+        side = (side + 1) & 3;
+    }
+    *x = COERCE((fx + grid_x * 500) / (grid_x * 1000) * grid_x, 0, gx);
+    *y = COERCE((fy + 1000) / 2000 * 2, 0, gy);
 }
 
 static REQUIRES(LiveViewTask)
@@ -2523,7 +2556,7 @@ void bolex_infinity_update()
         /* offsets from the centred window (update_cropping_offsets adds (max - res) / 2) */
         int px, py;
         if (bolex_path() == 2)
-            bolex_square_pos(n, max_res_x - res_x, max_res_y - res_y, &px, &py);
+            bolex_square_pos(n, max_res_x - res_x, max_res_y - res_y, BPP == 16 ? 2 : 8, &px, &py);
         else
             bolex_infinity_pos(n, max_res_x - res_x, max_res_y - res_y, &px, &py);
         /* the path starts with the first frame kept (the first second is not recorded) */
@@ -3852,7 +3885,7 @@ static void compress_task()
 
         /* where to cut this frame: set per frame by process_frame; a slot that never went
          * through process_frame (warm-up) uses the current one */
-        int crop_x = slots[slot_index].crop_x ? slots[slot_index].crop_x : (skip_x + 7) & ~7;
+        int crop_x = slots[slot_index].crop_x ? slots[slot_index].crop_x : (BPP == 16) ? (skip_x & ~1) : (skip_x + 7) & ~7;
         int crop_y = slots[slot_index].crop_x ? slots[slot_index].crop_y : skip_y & ~1;
 
         edmac_start_clock = GET_DIGIC_TIMER();
@@ -3925,7 +3958,7 @@ static void compress_task()
             edmac_copy_rectangle_cbr_start(
                 (void*)out_ptr, fullSizeBuffer,
                 raw_info.pitch,
-                crop_x/8*BPP, crop_y,
+                (BPP == 16) ? crop_x * 2 : crop_x/8*BPP, crop_y,
                 res_x*BPP/8, 0, 0, res_x*BPP/8, res_y,
                 &edmac_cbr_r, &edmac_cbr_w, NULL
             );
@@ -4049,7 +4082,7 @@ void process_frame(int next_fullsize_buffer_pos)
     /* set VIDF metadata for this frame */
     vidf_hdr.frameNumber = slots[capture_slot].frame_number - 1;
     mlv_set_timestamp((mlv_hdr_t*)&vidf_hdr, mlv_start_timestamp);
-    slots[capture_slot].crop_x = (skip_x + 7) & ~7;
+    slots[capture_slot].crop_x = (BPP == 16) ? (skip_x & ~1) : (skip_x + 7) & ~7;
     slots[capture_slot].crop_y = skip_y & ~1;
     vidf_hdr.cropPosX = (skip_x + 7) & ~7;
     vidf_hdr.cropPosY = skip_y & ~1;
@@ -4198,6 +4231,21 @@ static ml_cbr_action h264_proxy_snd_rec_cbr (const char *event, void *data)
     return ML_CBR_CONTINUE;
 }
 
+/* 16-bit raw (Bolex QUAD): 1 if the 14-bit values come as they are, 4 if shifted up by 2 bits.
+ * The darkest pixels say: unshifted they sit near the black level (~2048 on the EOS M),
+ * shifted near 4 times that. */
+static int bolex16_scale(void)
+{
+    uint16_t * p = (uint16_t *) raw_info.buffer;
+    if (!p || raw_info.width < 64 || raw_info.height < 64)
+        return 4;
+    int lo = 65535;
+    for (int y = raw_info.height / 4; y < raw_info.height * 3 / 4; y += 37)
+        for (int x = 16; x < raw_info.width - 16; x += 29)
+            lo = MIN(lo, p[y * raw_info.width + x]);
+    return lo > 5000 ? 4 : 1;
+}
+
 static REQUIRES(RawRecTask)
 void init_mlv_chunk_headers(struct raw_info * raw_info)
 {
@@ -4269,9 +4317,20 @@ void init_mlv_chunk_headers(struct raw_info * raw_info)
     /* scale black and white levels, minimizing the roundoff error */
     int black14 = rawi_hdr.raw_info.black_level;
     int white14 = rawi_hdr.raw_info.white_level;
+    if (BPP == 16)
+    {
+        /* 16-bit (Bolex QUAD): the 14-bit values either as they are or shifted up by 2 bits -
+         * the raw buffer tells which (bolex16_scale) */
+        int k = bolex16_scale();
+        rawi_hdr.raw_info.black_level = black14 * k;
+        rawi_hdr.raw_info.white_level = white14 * k;
+    }
+    else
+    {
     int bpp_scaling = (1 << (14 - BPP));
     rawi_hdr.raw_info.black_level = (black14 + bpp_scaling/2) / bpp_scaling;
     rawi_hdr.raw_info.white_level = (white14 + bpp_scaling/2) / bpp_scaling;
+    }
     
     if (cam_eos_m)
     {

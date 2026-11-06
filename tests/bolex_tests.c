@@ -271,32 +271,37 @@ int main(void)
         CHECK(maxdx <= 16 && maxdy <= 8, "steps %d %d", maxdx, maxdy);
     }
 
-    /* 2.8K QUAD: a 1.66 window of 1600 in the 2880x1226 readout, a rectangle at constant speed:
-     * every frame 8 px across or 2 lines down / up, starting top right, going down first */
+    /* 2.8K QUAD (16-bit): a 1.66 window of 1600 in the 2880x1226 readout, a rectangle with
+     * rounded corners at 2 px a frame along the path, on even columns and lines, starting at the
+     * top of the right side going down; no jumps anywhere, the corners gradual */
     {
         const struct bolex_mode * m = &bolex_modes[BOLEX_MODE_SQUARE];
         CHECK(m->readout == BOLEX_RO_28K && m->window_x == 1600 && m->aspect_x100 == 166 && m->path == BOLEX_PATH_SQUARE &&
               bolex_modes[BOLEX_MODE_INF].path == BOLEX_PATH_INFINITY, "QUAD mode");
         int res_x = 1600, res_y = calc_res_y(res_x, 1226, 166, 100, 1.0f);
         int room_x = 2880 - res_x, room_y = 1226 - res_y;
-        int px, py, x, y, corners = 0, bad = 0, loopn = 0;
-        bolex_square_pos(0, room_x, room_y, &px, &py);
-        CHECK(px == (room_x & ~7) && py == 0, "starts top right");
-        for (int n = 1; n < 4000; n++)
+        int px, py, x, y, maxdx = 0, maxdy = 0, xlo = 9999, xhi = 0, ylo = 9999, yhi = 0, loopn = 0, still = 0;
+        bolex_square_pos(0, room_x, room_y, 2, &px, &py);
+        CHECK(px == room_x && py == BOLEX_SQ_RADIUS, "starts at the top of the right side: %d %d", px, py);
+        int x0 = px, y0 = py;
+        for (int n = 1; n < 6000; n++)
         {
-            bolex_square_pos(n, room_x, room_y, &x, &y);
-            int dx = ABS(x - px), dy = ABS(y - py);
-            CHECK(x % 8 == 0 && y % 2 == 0 && x >= 0 && x <= room_x && y >= 0 && y <= room_y, "pos %d %d", x, y);
-            bad += !((dx == 8 && dy == 0) || (dx == 0 && dy == 2) || (dx == 0 && dy == 0));
-            corners += (x == 0 || x == (room_x & ~7)) && (y == 0 || y == (room_y & ~1));
-            if (!loopn && n > 10 && x == (room_x & ~7) && y == 0) loopn = n;
-            if (n == 5) CHECK(x == (room_x & ~7) && y == 10, "goes down first: %d %d", x, y);
+            bolex_square_pos(n, room_x, room_y, 2, &x, &y);
+            CHECK(x % 2 == 0 && y % 2 == 0 && x >= 0 && x <= room_x && y >= 0 && y <= room_y, "pos %d %d", x, y);
+            maxdx = MAX(maxdx, ABS(x - px)); maxdy = MAX(maxdy, ABS(y - py)); still += x == px && y == py;
+            xlo = MIN(xlo, x); xhi = MAX(xhi, x); ylo = MIN(ylo, y); yhi = MAX(yhi, y);
+            if (!loopn && n > 100 && x == x0 && y == y0) loopn = n;
+            if (n == 5) CHECK(x == room_x && y == BOLEX_SQ_RADIUS + 10, "goes down first: %d %d", x, y);
             px = x; py = y;
         }
-        printf("rectangle: %dx%d window, room %dx%d, loop %d frames (%.1f s at 24), uneven steps %d\n",
-               res_x, res_y, room_x, room_y, loopn, loopn / 24.0, bad);
-        CHECK(bad <= 8, "uneven steps %d", bad);
+        printf("rounded rectangle: %dx%d window, room %dx%d, loop %d frames (%.1f s at 24), largest step %d px / %d lines, %d frames still\n",
+               res_x, res_y, room_x, room_y, loopn, loopn / 24.0, maxdx, maxdy, still);
         CHECK(res_y == 964, "window height %d", res_y);
+        CHECK(maxdx <= 2 && maxdy <= 2, "steps %d %d", maxdx, maxdy);
+        CHECK(xlo == 0 && xhi == room_x && ylo == 0 && yhi == room_y, "the whole room");
+        /* at 14-bit the same path on the 8-pixel grid */
+        bolex_square_pos(7, room_x, room_y, 8, &x, &y);
+        CHECK(x % 8 == 0, "8-pixel grid");
     }
 
     /* each mode's recorded frame, as mlv_lite works it out from the readout height */
