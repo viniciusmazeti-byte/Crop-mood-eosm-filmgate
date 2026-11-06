@@ -60,6 +60,7 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "#define BOLEX_MODE_976"
   python3 tests/extract.py $CR line     "#define BOLEX_MODE_976_166"
   python3 tests/extract.py $CR line     "#define BOLEX_MODE_SENA"
+  python3 tests/extract.py $CR line     "#define BOLEX_MODE_INF"
   python3 tests/extract.py $CR line     "#define BOLEX_MODES"
   python3 tests/extract.py $CR line     "struct bolex_mode {"
   python3 tests/extract.py $CR block    "static const struct bolex_mode bolex_modes[BOLEX_MODES]"
@@ -99,6 +100,9 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define SENA_KELVIN_MIN"
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define SENA_KELVIN_MAX"
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c function sena_kelvin
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_INF_FRAMES"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_sin_x1000
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_infinity_offsets
 } > "$OUT/bolex_mlv_snippets.h"
 
 # 2. structure check: the film table exists once, in src/film-formats.h only

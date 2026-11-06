@@ -1192,7 +1192,7 @@ void update_cropping_offsets()
     int sx = left_margin + (max_res_x - res_x) / 2;
     int sy = top_margin  + (max_res_y - res_y) / 2;
 
-    if (FRAMING_PANNING)
+    if (FRAMING_PANNING || (bolex_format() && bolex_infinity()))
     {
         sx += frame_offset_x;
         sy += frame_offset_y;
@@ -1268,6 +1268,8 @@ void update_resolution_params()
         else
             num = a, den = 100;
         res_x = MIN(max_res_y * num / den, max_res_x) & ~15;    /* too wide: the readout's width */
+        if (bolex_infinity())
+            res_x = MIN(bolex_infinity(), max_res_x) & ~15;      /* the travelling window */
     }
 
     res_y = calc_res_y(res_x, max_res_y, num, den, squeeze_factor);
@@ -2423,9 +2425,68 @@ static void show_buffer_status()
     }
 }
 
+/* Bolex 976p INF: while recording, the window travels an infinity sign (Gerono's lemniscate:
+ * x = sin t, y = sin 2t) inside the readout, one loop every BOLEX_INF_FRAMES frames filmed -
+ * 288 = 12 s on screen at 24.  It starts in the centre, going right and up.  The window moves
+ * by 4 pixels across (the 14-bit packing) and 2 lines down (the Bayer pattern).  Frames dropped
+ * still count, so a drop is a jump along the path. */
+#define BOLEX_INF_FRAMES    288
+
+/* sine x 1000 of t tenths of a degree (Bhaskara's approximation, within 0.2%) */
+static int bolex_sin_x1000(int t)
+{
+    t %= 3600;
+    if (t < 0)
+        t += 3600;
+    int sign = 1;
+    if (t >= 1800)
+    {
+        t -= 1800;
+        sign = -1;
+    }
+    int64_t p = (int64_t) t * (1800 - t);
+    return sign * (int)(4000LL * p / (4050000LL - p));
+}
+
+/* the window's offset from the centre at frame n, within +-xmax, +-ymax */
+static void bolex_infinity_offsets(int n, int xmax, int ymax, int * x, int * y)
+{
+    int t = (int)((int64_t)(n % BOLEX_INF_FRAMES) * 3600 / BOLEX_INF_FRAMES);
+    int fx = xmax * bolex_sin_x1000(t) / 1000;
+    int fy = -ymax * bolex_sin_x1000(2 * t) / 1000;     /* up first (lines count down) */
+    *x = (fx >= 0 ? (fx + 2) : (fx - 2)) / 4 * 4;
+    *y = (fy >= 0 ? (fy + 1) : (fy - 1)) / 2 * 2;
+}
+
+static REQUIRES(LiveViewTask)
+void bolex_infinity_update()
+{
+    static int n = 0;
+    int x = 0, y = 0;
+    if (RAW_IS_RECORDING)
+    {
+        int xmax = ((max_res_x - res_x) / 2) & ~3;
+        int ymax = ((max_res_y - res_y) / 2) & ~1;
+        bolex_infinity_offsets(n++, xmax, ymax, &x, &y);
+    }
+    else
+        n = 0;
+    if (x != frame_offset_x || y != frame_offset_y)
+    {
+        frame_offset_x = x;
+        frame_offset_y = y;
+        update_cropping_offsets();
+    }
+}
+
 static REQUIRES(LiveViewTask)
 void panning_update()
 {
+    if (bolex_format() && bolex_infinity())
+    {
+        bolex_infinity_update();
+        return;
+    }
     if (!FRAMING_PANNING) return;
 
     int sx = raw_info.active_area.x1 + (max_res_x - res_x) / 2;

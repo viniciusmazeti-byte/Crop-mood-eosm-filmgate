@@ -31,3 +31,5 @@ extern WEAK_FUNC(ret_0) int bolex_play_fps();
 extern WEAK_FUNC(ret_0) int bolex_sena();
 /* Bolex: the frame to record, width : height x 100 (133 = 4:3, 166, 185); 0 = not a Bolex build */
 extern WEAK_FUNC(ret_0) int bolex_aspect_x100();
+/* Bolex: the width of the window that travels an infinity sign while recording (0 = none) */
+extern WEAK_FUNC(ret_0) int bolex_infinity();
