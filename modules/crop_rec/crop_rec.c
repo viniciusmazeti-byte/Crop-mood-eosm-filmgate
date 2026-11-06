@@ -259,7 +259,7 @@ static const struct bolex_mode bolex_modes[BOLEX_MODES] = {
     { "976p 1.66", BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 166, 0, 0, 0, 14 }, /* 1616x974 of 1736x976 */
     { "SENA",      BOLEX_RO_28K,  0x325, 3308,  0x633,  4000, 12000, 360, 12, 1, 133, 0, 0, 0, 14 }, /* 1632x1224 of 2.8K; 12 idle; 4 / 6 / 8 / 12 */
     { "2.8K 1.66 16", BOLEX_RO_28K, 0x325, 2646, 2480, 14000, 16000, 133, 24, 0, 166, 0, 0, 0, 16 }, /* 2032x1224 16-bit: ~5 MB a frame, so 14 - 16 fps */
-    { "60P 1.66",  BOLEX_RO_694,  0x207, 0x401, 0x401, 54000, 59970, 133, 24, 0, 166, 0, 0, 0, 14 }, /* 1152x694 of 1736x694 (3x3); 60 is its most */
+    { "60P 1.66",  BOLEX_RO_694,  0x207, 0x401, 0x401, 54000, 59970, 320, 24, 0, 166, 0, 0, 0, 14 }, /* 1152x694 of 1736x694 (3x3); 60 is its most */
 };
 
 /* Sensor test (the eighth mode, last; camera test of "make the infinity fluid"): the window the
@@ -280,6 +280,14 @@ static int bolex_cmos_writes0 = 0;          /* ... when the take started */
 static volatile int bolex_cmos2_seen = -1;  /* CMOS[2] as Canon writes it (-1: not in its lists) */
 static int bolex_test_base = 0;             /* the value set by hand, back to it after a take */
 static volatile int bolex_test_refresh = 0; /* Live View to rebuild (bolex_step) */
+
+/* 60P, for the camera in the hand (camera test: "the best so far for smooth hand-held
+ * movement, not enough yet"): no frames dropped, and an open shutter - motion blur hides the
+ * fine shake - wandering between BOLEX_60P_ANGLE_MIN and MAX (degrees) like the speed does
+ * (bolex_angle_live, from bolex_speed_task); not recording, its middle (the table's angle) */
+#define BOLEX_60P_ANGLE_MIN 290
+#define BOLEX_60P_ANGLE_MAX 350
+static volatile int bolex_angle_live = 0;   /* degrees, 0 = the mode's angle */
 
 /* Sena: the speeds drawn while recording (fps), each held SENA_HOLD_MIN_MS .. MAX_MS */
 static const int sena_fps[] = { 4, 6, 8, 12 };
@@ -1540,7 +1548,8 @@ static void FAST adtg_hook(uint32_t* regs, uint32_t* stack, uint32_t pc)
     if (bolex_fmt && shutter_blanking)
     {
         int tb = (shamem_read(0xC0F06014) & 0xFFFF) + 1;
-        shutter_blanking = nrzi_encode(bolex_blanking(tb, bolex_modes[bolex_mode].angle, bolex_flicker_x1000));
+        int angle = bolex_angle_live ? bolex_angle_live : bolex_modes[bolex_mode].angle;
+        shutter_blanking = nrzi_encode(bolex_blanking(tb, angle, bolex_flicker_x1000));
     }
 
     /* all modes may want to override shutter speed */
@@ -7099,7 +7108,8 @@ static void slim_cover_hold_and_release(int hold_ms)
  * so 2 a frame across (4 times slower), 2 lines a frame down, rounded corners.
  * Then QUAD out; 2.8K 1.66 16 (first: the whole 1.66 frame, 16-bit uncompressed - the user liked
  * the white noise it showed - at 14-16 fps for the card) and 60P 1.66 after 976p 1.66 (the 3x3
- * readout of 694 lines, dannephoto's fastest: 1152x694, 54-60 fps, played at 24).)
+ * readout of 694 lines, dannephoto's fastest: 1152x694, 54-60 fps, played at 24).
+ * Then 60P for the hand: no drops, the shutter open and wandering 290-350 degrees.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -7200,7 +7210,7 @@ static int bolex_rec_start = 0;
  * a mode switch is under way (0: the core leaves Timer B alone); the core writes it */
 static void bolex_speed_task(void)
 {
-    static struct bolex_wander w;
+    static struct bolex_wander w, wa;
     static uint32_t sena_seed = 1;
     static int sena_cur = -1, sena_until = 0;
     int last = get_ms_clock();
@@ -7221,6 +7231,7 @@ static void bolex_speed_task(void)
                 const struct bolex_mode * m0 = &bolex_modes[bolex_mode];
                 bolex_wander_start(&w, (uint32_t) now * 2654435761u,
                     (int)(32000000000LL / ((m0->timer_a + 1) * (int64_t)(m0->timer_b_idle + 1))));
+                bolex_wander_start(&wa, (uint32_t) now * 40503u + 7, m0->angle * 1000);
             }
             const struct bolex_mode * m = &bolex_modes[bolex_mode];
             if (!bolex_mode_active())
@@ -7241,6 +7252,8 @@ static void bolex_speed_task(void)
             }
             else
                 bolex_timer_b_live = bolex_timer_b_for(m, bolex_wander_step(&w, dt, m->fps_min, m->fps_max));
+            bolex_angle_live = (bolex_mode == BOLEX_MODE_694_166)
+                ? bolex_wander_step(&wa, dt, BOLEX_60P_ANGLE_MIN * 1000, BOLEX_60P_ANGLE_MAX * 1000) / 1000 : 0;
         }
         else
         {
@@ -7250,6 +7263,7 @@ static void bolex_speed_task(void)
                 bolex_test_refresh = 1;
             }
             bolex_rec_start = 0;
+            bolex_angle_live = 0;
             sena_cur = -1;
             bolex_timer_b_live = bolex_mode_active() ? bolex_modes[bolex_mode].timer_b_idle : 0;
         }
@@ -7330,6 +7344,12 @@ int bolex_aspect_x100()
 int bolex_infinity()
 {
     return bolex_fmt ? bolex_modes[bolex_mode].window_x : 0;
+}
+
+/* used by mlv_lite: no frames dropped in this mode (60P: for the camera in the hand) */
+int bolex_no_drops()
+{
+    return bolex_fmt && bolex_mode == BOLEX_MODE_694_166;
 }
 
 /* used by mlv_lite: the mode records 16-bit uncompressed */

@@ -37,6 +37,8 @@ extern WEAK_FUNC(ret_0) int bolex_infinity();
 extern WEAK_FUNC(ret_0) int bolex_path();
 /* Bolex: the mode records 16-bit uncompressed */
 extern WEAK_FUNC(ret_0) int bolex_bits16();
+/* Bolex: no frames dropped in this mode */
+extern WEAK_FUNC(ret_0) int bolex_no_drops();
 /* Bolex sensor test: chosen; the offset added to CMOS[7] now; CMOS register lists Canon wrote */
 extern WEAK_FUNC(ret_0) int bolex_test();
 extern WEAK_FUNC(ret_0) int bolex_test_delta();

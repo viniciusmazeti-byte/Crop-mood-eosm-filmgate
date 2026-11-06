@@ -4602,7 +4602,7 @@ void raw_video_rec_task(uint32_t thread)
         bolex_drop_seed = bolex_int_seed ^ 0xD80Bu;
         bolex_drop_last = 0;
         bolex_take_sena = bolex_sena();
-        bolex_take_inf = bolex_infinity() != 0;
+        bolex_take_inf = bolex_infinity() != 0 || bolex_no_drops();     /* no drops (also 60P) */
         bolex_take_test = bolex_test();
         bolex_test_log_n = 0;
         bolex_filmed = bolex_film_t0 = bolex_film_t1 = 0;

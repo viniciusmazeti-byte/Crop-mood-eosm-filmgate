@@ -200,6 +200,23 @@ int main(void)
                32e6 / ((m60->timer_a + 1.0) * (m60->timer_b_min + 1.0)));
         CHECK(m16->bits == 16 && m16->aspect_x100 == 166 && !m16->window_x && !m16->path && mbs < 81, "16-bit mode %.0f MB/s", mbs);
         CHECK(m60->readout == BOLEX_RO_694 && m60->aspect_x100 == 166 && m60->bits == 14 && m60->play_fps == 24, "60P mode");
+        /* 60P for the hand: the shutter wanders 290-350 degrees, the blanking keeps it inside the frame */
+        CHECK(m60->angle == (BOLEX_60P_ANGLE_MIN + BOLEX_60P_ANGLE_MAX) / 2, "60P middle angle %d", m60->angle);
+        {
+            struct bolex_wander wa;
+            bolex_wander_start(&wa, 77, m60->angle * 1000);
+            int alo = 999, ahi = 0;
+            for (int t = 0; t < 600000; t += 40)
+            {
+                int a = bolex_wander_step(&wa, 40, BOLEX_60P_ANGLE_MIN * 1000, BOLEX_60P_ANGLE_MAX * 1000) / 1000;
+                alo = MIN(alo, a); ahi = MAX(ahi, a);
+                int tb = m60->timer_b_min + 1;
+                int real = 360 * (tb - bolex_blanking(tb, a, bolex_pow2_x1000(BOLEX_FLICKER_X1000 + BOLEX_BREATH_MAX_X1000))) / tb;
+                CHECK(real <= 360, "angle %d over the frame", real);
+            }
+            printf("60P shutter: %d..%d degrees\n", alo, ahi);
+            CHECK(alo < 300 && ahi > 340, "60P angle range %d..%d", alo, ahi);
+        }
     }
 
     /* intermittency per frame: within the ranges, the weave smooth (small steps) */
