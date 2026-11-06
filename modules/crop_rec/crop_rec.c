@@ -234,25 +234,27 @@ static int bolex_blanking(int tb, int angle, int factor_x1000)
 #define BOLEX_RO_976        2
 #define BOLEX_MODE_1620     0
 #define BOLEX_MODE_INF      1
-#define BOLEX_MODE_166      2
-#define BOLEX_MODE_185      3
-#define BOLEX_MODE_976      4
-#define BOLEX_MODE_976_166  5
-#define BOLEX_MODE_SENA     6
-#define BOLEX_MODE_TEST     7
+#define BOLEX_MODE_SQUARE   2
+#define BOLEX_MODE_166      3
+#define BOLEX_MODE_185      4
+#define BOLEX_MODE_976      5
+#define BOLEX_MODE_976_166  6
+#define BOLEX_MODE_SENA     7
 #define BOLEX_MODES         8
+#define BOLEX_PATH_INFINITY 1       /* the window's path while recording (mlv_lite) */
+#define BOLEX_PATH_SQUARE   2
 /* + the frame recorded (width : height x 100, the full height of the readout; mlv_lite), and a
  * smaller window (its width, 0 = none) that travels an infinity sign inside the readout */
-struct bolex_mode { const char * name; int readout; int timer_a; int timer_b_idle; int timer_b_min; int fps_min; int fps_max; int angle; int play_fps; int sena; int aspect_x100; int window_x; int test; };
+struct bolex_mode { const char * name; int readout; int timer_a; int timer_b_idle; int timer_b_min; int fps_min; int fps_max; int angle; int play_fps; int sena; int aspect_x100; int window_x; int test; int path; };
 static const struct bolex_mode bolex_modes[BOLEX_MODES] = {
-    { "1620p",     BOLEX_RO_1620, 0x279, 0x838, 0x7E2, 20000, 25000, 133, 24, 0, 133, 0, 0 }, /* 2160x1620; 23.976 idle, 25 the most the LCD shows */
-    { "976p INF",  BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 1024, 0 }, /* 1024x768 travelling an infinity sign */
-    { "2.8K 1.66", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 166, 0, 0 }, /* 2032x1224 of 2880x1226; 23.99 idle, 25 its most */
-    { "2.8K 1.85", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 185, 0, 0 }, /* 2256x1220 of 2880x1226 */
-    { "976p",      BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 0, 0 }, /* 1296x972 of 1736x976 (3x3); 46.8 is its most */
-    { "976p 1.66", BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 166, 0, 0 }, /* 1616x974 of 1736x976 */
-    { "SENA",      BOLEX_RO_28K,  0x325, 3308,  0x633,  4000, 12000, 360, 12, 1, 133, 0, 0 }, /* 1632x1224 of 2.8K; 12 idle; 4 / 6 / 8 / 12 */
-    { "SENSOR",    BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 0, 1 },    /* test: the sensor's own window, moved (bolex_sensor_delta) */
+    { "1620p",     BOLEX_RO_1620, 0x279, 0x838, 0x7E2, 20000, 25000, 133, 24, 0, 133, 0, 0, 0 }, /* 2160x1620; 23.976 idle, 25 the most the LCD shows */
+    { "976p INF",  BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 1024, 0, BOLEX_PATH_INFINITY }, /* 1024x768 travelling an infinity sign */
+    { "2.8K QUAD",  BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 166, 1600, 0, BOLEX_PATH_SQUARE }, /* 1600x964 travelling a rectangle */
+    { "2.8K 1.66", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 166, 0, 0, 0 }, /* 2032x1224 of 2880x1226; 23.99 idle, 25 its most */
+    { "2.8K 1.85", BOLEX_RO_28K,  0x325, 0x676, 0x633, 20000, 25000, 133, 24, 0, 185, 0, 0, 0 }, /* 2256x1220 of 2880x1226 */
+    { "976p",      BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 133, 0, 0, 0 }, /* 1296x972 of 1736x976 (3x3); 46.8 is its most */
+    { "976p 1.66", BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 166, 0, 0, 0 }, /* 1616x974 of 1736x976 */
+    { "SENA",      BOLEX_RO_28K,  0x325, 3308,  0x633,  4000, 12000, 360, 12, 1, 133, 0, 0, 0 }, /* 1632x1224 of 2.8K; 12 idle; 4 / 6 / 8 / 12 */
 };
 
 /* Sensor test (the eighth mode, last; camera test of "make the infinity fluid"): the window the
@@ -7052,7 +7054,14 @@ static void slim_cover_hold_and_release(int hold_ms)
  * sign inside the 1736x976 readout - the camera still, the frame moving (mlv_lite).  Then moved
  * to second, no dropped frames, the path on the 8-pixel grid the window really moves on, and
  * kept in Canon's x5 view (at x1 it ran at Canon's 24 fps).  Then 5 times slower: a loop
- * in 40 s on screen.)
+ * in 40 s on screen.
+ * A sensor test (moving the sensor's own readout instead of the crop, for a fluid infinity)
+ * found CMOS[7] moves the 976p picture 40 lines at a time and CMOS[2] breaks the picture into
+ * colour casts and column stripes: no finer horizontal step in the camera.  The test mode is
+ * gone; its code stays, unused.
+ * Then 2.8K QUAD, third: a 1.66:1 window of 1600x964 in the 2.8K readout travelling a
+ * rectangle at constant speed - straight lines need no slowing down, so no uneven steps:
+ * 8 pixels a frame across (the crop's smallest step), 2 lines a frame down / up.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -7282,6 +7291,12 @@ int bolex_aspect_x100()
 int bolex_infinity()
 {
     return bolex_fmt ? bolex_modes[bolex_mode].window_x : 0;
+}
+
+/* used by mlv_lite: the travelling window's path (BOLEX_PATH_..., 0 = none) */
+int bolex_path()
+{
+    return bolex_fmt ? bolex_modes[bolex_mode].path : 0;
 }
 
 /* used by mlv_lite: the sensor test mode is chosen; its CMOS[7] offset now; CMOS lists written */

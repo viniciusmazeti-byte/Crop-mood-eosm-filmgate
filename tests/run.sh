@@ -61,7 +61,9 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "#define BOLEX_MODE_976_166"
   python3 tests/extract.py $CR line     "#define BOLEX_MODE_SENA"
   python3 tests/extract.py $CR line     "#define BOLEX_MODE_INF"
-  python3 tests/extract.py $CR line     "#define BOLEX_MODE_TEST"
+  python3 tests/extract.py $CR line     "#define BOLEX_MODE_SQUARE"
+  python3 tests/extract.py $CR line     "#define BOLEX_PATH_INFINITY"
+  python3 tests/extract.py $CR line     "#define BOLEX_PATH_SQUARE"
   python3 tests/extract.py $CR line     "#define BOLEX_MODES"
   python3 tests/extract.py $CR line     "struct bolex_mode {"
   python3 tests/extract.py $CR block    "static const struct bolex_mode bolex_modes[BOLEX_MODES]"
@@ -104,6 +106,9 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_INF_FRAMES"
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_sin_x1000
   python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_infinity_pos
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_SQ_H"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c line     "#define BOLEX_SQ_V"
+  python3 tests/extract.py modules/mlv_lite/mlv_lite.c function bolex_square_pos
 } > "$OUT/bolex_mlv_snippets.h"
 
 # 2. structure check: the film table exists once, in src/film-formats.h only

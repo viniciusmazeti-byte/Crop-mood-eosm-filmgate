@@ -2489,6 +2489,30 @@ static void bolex_infinity_pos(int n, int room_x, int room_y, int * x, int * y)
     *y = COERCE((fy + 1000) / 2000 * 2, 0, gy);
 }
 
+/* Bolex 2.8K QUAD: while recording, the window travels a rectangle inside the readout at
+ * constant speed: from the top right corner down (BOLEX_SQ_V lines a frame), along the bottom
+ * to the left (BOLEX_SQ_H pixels a frame: the crop's 8-pixel step, every frame - straight lines
+ * at constant speed need no in-between steps), up, and back right along the top.  Positions
+ * as bolex_infinity_pos. */
+#define BOLEX_SQ_H          8
+#define BOLEX_SQ_V          2
+
+static void bolex_square_pos(int n, int room_x, int room_y, int * x, int * y)
+{
+    int gx = room_x & ~7, gy = room_y & ~1;
+    int down = (gy + BOLEX_SQ_V - 1) / BOLEX_SQ_V;     /* frames for each side */
+    int across = (gx + BOLEX_SQ_H - 1) / BOLEX_SQ_H;
+    int loop = 2 * (down + across);
+    int k = loop ? n % loop : 0;
+    if (k < down)                       { *x = gx; *y = MIN(k * BOLEX_SQ_V, gy); return; }
+    k -= down;
+    if (k < across)                     { *x = MAX(gx - k * BOLEX_SQ_H, 0); *y = gy; return; }
+    k -= across;
+    if (k < down)                       { *x = 0; *y = MAX(gy - k * BOLEX_SQ_V, 0); return; }
+    k -= down;
+    *x = MIN(k * BOLEX_SQ_H, gx); *y = 0;
+}
+
 static REQUIRES(LiveViewTask)
 void bolex_infinity_update()
 {
@@ -2498,7 +2522,13 @@ void bolex_infinity_update()
     {
         /* offsets from the centred window (update_cropping_offsets adds (max - res) / 2) */
         int px, py;
-        bolex_infinity_pos(n++, max_res_x - res_x, max_res_y - res_y, &px, &py);
+        if (bolex_path() == 2)
+            bolex_square_pos(n, max_res_x - res_x, max_res_y - res_y, &px, &py);
+        else
+            bolex_infinity_pos(n, max_res_x - res_x, max_res_y - res_y, &px, &py);
+        /* the path starts with the first frame kept (the first second is not recorded) */
+        if (bolex_take_t0 && get_ms_clock() - bolex_take_t0 >= BOLEX_HEAD_MS)
+            n++;
         x = px - (max_res_x - res_x) / 2;
         y = py - (max_res_y - res_y) / 2;
     }
