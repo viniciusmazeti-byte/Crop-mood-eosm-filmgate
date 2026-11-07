@@ -1547,14 +1547,24 @@ static volatile int fps_timers_updated = 0;
  * state like the FPS override's timers, whenever it changes, so the frame rate can change while
  * recording.  crop_rec returns the same value when Canon writes the timer itself. */
 int bolex_timer_b_live = 0;
+/* ... and Timer A (the line time, register value as crop_rec gives it), 0 = none: written here
+ * too, so a readout with another line time runs at its speed at once, not only once Canon writes
+ * the timer itself (camera test: 60P was not at 60 until a first take) */
+int bolex_timer_a_live = 0;
 #endif
 
 void fps_update_timers_from_evfstate()
 {
 #ifdef CONFIG_BOLEX
     {
-        static int last = 0;
-        int b = bolex_timer_b_live;
+        static int last = 0, last_a = 0;
+        int b = bolex_timer_b_live, a = bolex_timer_a_live;
+        if (a && a != last_a && lv)
+        {
+            EngDrvOutLV(FPS_REGISTER_A, a | (a << 16));
+            EngDrvOutLV(FPS_REGISTER_CONFIRM_CHANGES, 1);
+        }
+        last_a = a;
         if (b && b != last && lv)
         {
             EngDrvOutLV(FPS_REGISTER_B, b);

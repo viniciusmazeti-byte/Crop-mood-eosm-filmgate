@@ -118,8 +118,11 @@ static int a35_short_readout = 0;   /* 48 fps on A35 16:9 / 1.85: 1736x958 reado
 
 /* Bolex (see the "Bolex" section further down) */
 static int bolex_fmt = 0;       /* BOLEX_4_3 (2) once crop_rec_init has run; 0 = not yet */
-/* src/fps-engio.c (Bolex core): Timer B to write live from the EVF state, 0 = none */
+/* src/fps-engio.c (Bolex core): Timer B to write live from the EVF state, 0 = none; and Timer A
+ * (the line time) - camera test: entering 60P the speed was not 60 until a first take, Canon had
+ * not written the new readout's Timer A yet */
 extern int bolex_timer_b_live;
+extern int bolex_timer_a_live;
 
 /* Bolex shutter, like a Bolex H16 Reflex: 133 degrees at every speed.  The speed wanders while
  * recording (bolex_speed_task), so the exposure follows it: slower frames get more light, as
@@ -259,7 +262,7 @@ static const struct bolex_mode bolex_modes[BOLEX_MODES] = {
     { "976p 1.66", BOLEX_RO_976,  0x20F, 0x50E, 0x50E, 42000, 46800, 133, 24, 0, 166, 0, 0, 0, 14 }, /* 1616x974 of 1736x976 */
     { "SENA",      BOLEX_RO_28K,  0x325, 3308,  0x633,  4000, 12000, 360, 12, 1, 133, 0, 0, 0, 14 }, /* 1632x1224 of 2.8K; 12 idle; 4 / 6 / 8 / 12 */
     { "2.8K 1.66 16", BOLEX_RO_28K, 0x325, 2646, 2480, 14000, 16000, 133, 24, 0, 166, 0, 0, 0, 16 }, /* 2032x1224 16-bit: ~5 MB a frame, so 14 - 16 fps */
-    { "60P 1.66",  BOLEX_RO_694,  0x207, 0x401, 0x401, 54000, 59970, 320, 24, 0, 166, 0, 0, 0, 14 }, /* 1152x694 of 1736x694 (3x3); 60 is its most */
+    { "60P 1.66",  BOLEX_RO_694,  0x207, 0x401, 0x401, 54000, 59970, 320, 15, 0, 166, 0, 0, 0, 14 }, /* 1152x694 of 1736x694 (3x3); 60 is its most */
 };
 
 /* Sensor test (the eighth mode, last; camera test of "make the infinity fluid"): the window the
@@ -287,6 +290,7 @@ static volatile int bolex_test_refresh = 0; /* Live View to rebuild (bolex_step)
  * (bolex_angle_live, from bolex_speed_task); not recording, its middle (the table's angle) */
 #define BOLEX_60P_ANGLE_MIN 290
 #define BOLEX_60P_ANGLE_MAX 350
+#define BOLEX_60P_FLICKER_X100 160  /* its exposure flicker, % of the others' ("a bit more blinking") */
 static volatile int bolex_angle_live = 0;   /* degrees, 0 = the mode's angle */
 
 /* Sena: the speeds drawn while recording (fps), each held SENA_HOLD_MIN_MS .. MAX_MS */
@@ -296,8 +300,8 @@ static const int sena_fps[] = { 4, 6, 8, 12 };
 /* the modes INFO twice goes through, in order; the first at every power on (not saved).  The
  * others stay in bolex_modes, out of the cycle (camera test: "keep only QUAD, 1.66, 976p 1.66,
  * Sena") */
-static const int bolex_cycle[] = { BOLEX_MODE_166_16, BOLEX_MODE_166, BOLEX_MODE_976_166, BOLEX_MODE_694_166, BOLEX_MODE_SENA };
-static int bolex_mode = BOLEX_MODE_166_16;
+static const int bolex_cycle[] = { BOLEX_MODE_166, BOLEX_MODE_976_166, BOLEX_MODE_694_166, BOLEX_MODE_SENA };
+static int bolex_mode = BOLEX_MODE_166;
 
 /* the mode after m on INFO twice (bolex_cycle) */
 static int bolex_next_mode(int m)
@@ -7109,7 +7113,9 @@ static void slim_cover_hold_and_release(int hold_ms)
  * Then QUAD out; 2.8K 1.66 16 (first: the whole 1.66 frame, 16-bit uncompressed - the user liked
  * the white noise it showed - at 14-16 fps for the card) and 60P 1.66 after 976p 1.66 (the 3x3
  * readout of 694 lines, dannephoto's fastest: 1152x694, 54-60 fps, played at 24).
- * Then 60P for the hand: no drops, the shutter open and wandering 290-350 degrees.)
+ * Then 60P for the hand: no drops, the shutter open and wandering 290-350 degrees.
+ * Then: 2.8K 1.66 16 out of the cycle; ISO up to 6400 in every mode; 60P played at 15 (slow
+ * motion 3.6-4x), its flicker 1.6 times the others', and its Timer A written at once.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -7236,6 +7242,7 @@ static void bolex_speed_task(void)
             const struct bolex_mode * m = &bolex_modes[bolex_mode];
             if (!bolex_mode_active())
                 continue;
+            bolex_timer_a_live = m->timer_a;
             if (m->test)
                 bolex_sensor_delta = MIN(bolex_test_base + (now - bolex_rec_start) / BOLEX_TEST_STEP_MS, BOLEX_TEST_MAX);
             if (m->sena)
@@ -7266,6 +7273,7 @@ static void bolex_speed_task(void)
             bolex_angle_live = 0;
             sena_cur = -1;
             bolex_timer_b_live = bolex_mode_active() ? bolex_modes[bolex_mode].timer_b_idle : 0;
+            bolex_timer_a_live = bolex_mode_active() ? bolex_modes[bolex_mode].timer_a : 0;
         }
     }
 }
@@ -7287,6 +7295,8 @@ static unsigned int bolex_vsync_cbr(unsigned int unused)
             last = now;
         }
         int ev = bolex_flicker_step(&f, COERCE(now - last, 1, 200));
+        if (bolex_mode == BOLEX_MODE_694_166)
+            ev = ev * BOLEX_60P_FLICKER_X100 / 100;
         bolex_flicker_x1000 = bolex_pow2_x1000(ev);
         last = now;
     }
@@ -7310,7 +7320,7 @@ extern int bolex_iso_clicks;
 extern int hist_draw;
 
 /* ISO choices on the Up / Down arrows */
-static const int bolex_isos[] = { ISO_100, ISO_200, ISO_400 };
+static const int bolex_isos[] = { ISO_100, ISO_200, ISO_400, ISO_800, ISO_1600, ISO_3200, ISO_6400 };
 
 /* the ISO choice one step up (+1) or down (-1), kept within bolex_isos[] */
 static int bolex_iso_step(int index, int sign)
@@ -7465,7 +7475,8 @@ static void bolex_info_pressed(void)
     {
         last = 0;
         bolex_mode = bolex_next_mode(bolex_mode);
-        bolex_timer_b_live = 0;         /* the core leaves Timer B alone until the new readout runs */
+        bolex_timer_b_live = 0;         /* the core leaves the timers alone until the new readout runs */
+        bolex_timer_a_live = 0;
         bolex_fixed_settings();
         eosm_lv_guard_request();        /* rebuild Live View: crop_rec applies the new readout */
         NotifyBox(2000, "BOLEX %s", bolex_modes[bolex_mode].name);

@@ -10,6 +10,10 @@ static int failures = 0, checks = 0;
 #define ISO_100 72
 #define ISO_200 80
 #define ISO_400 88
+#define ISO_800 96
+#define ISO_1600 104
+#define ISO_3200 112
+#define ISO_6400 120
 #define COUNT(a) (sizeof(a) / sizeof((a)[0]))
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 #define ABS(a) ((a) < 0 ? -(a) : (a))
@@ -189,17 +193,17 @@ int main(void)
         CHECK(bolex_trim_count(times, 10, 1000) == 10, "short take");
         CHECK(BOLEX_TRIM_MS == 0 && BOLEX_HEAD_MS == 0, "no cuts at the ends");
         /* INFO twice: QUAD (at power on) -> 1.66 -> 976p 1.66 -> SENA -> QUAD */
-        CHECK(bolex_mode == BOLEX_MODE_166_16 && COUNT(bolex_cycle) == 5, "start mode / cycle");
-        CHECK(bolex_next_mode(BOLEX_MODE_166_16) == BOLEX_MODE_166 && bolex_next_mode(BOLEX_MODE_166) == BOLEX_MODE_976_166 &&
+        CHECK(bolex_mode == BOLEX_MODE_166 && COUNT(bolex_cycle) == 4, "start mode / cycle");
+        CHECK(bolex_next_mode(BOLEX_MODE_166) == BOLEX_MODE_976_166 &&
               bolex_next_mode(BOLEX_MODE_976_166) == BOLEX_MODE_694_166 && bolex_next_mode(BOLEX_MODE_694_166) == BOLEX_MODE_SENA &&
-              bolex_next_mode(BOLEX_MODE_SENA) == BOLEX_MODE_166_16 && bolex_next_mode(BOLEX_MODE_SQUARE) == BOLEX_MODE_166_16, "cycle order");
+              bolex_next_mode(BOLEX_MODE_SENA) == BOLEX_MODE_166 && bolex_next_mode(BOLEX_MODE_166_16) == BOLEX_MODE_166, "cycle order");
         /* the 16-bit 1.66 frame: 2032x1224 x 2 bytes at its fastest within ~80 MB/s; 60P its fastest 60 */
         const struct bolex_mode * m16 = &bolex_modes[BOLEX_MODE_166_16], * m60 = &bolex_modes[BOLEX_MODE_694_166];
         double mbs = 2032.0 * 1224 * 2 * m16->fps_max / 1000 / 1e6;
         printf("2.8K 1.66 16: %.0f MB/s at %d fps; 60P: %.2f fps at its fastest\n", mbs, m16->fps_max / 1000,
                32e6 / ((m60->timer_a + 1.0) * (m60->timer_b_min + 1.0)));
         CHECK(m16->bits == 16 && m16->aspect_x100 == 166 && !m16->window_x && !m16->path && mbs < 81, "16-bit mode %.0f MB/s", mbs);
-        CHECK(m60->readout == BOLEX_RO_694 && m60->aspect_x100 == 166 && m60->bits == 14 && m60->play_fps == 24, "60P mode");
+        CHECK(m60->readout == BOLEX_RO_694 && m60->aspect_x100 == 166 && m60->bits == 14 && m60->play_fps == 15, "60P mode");
         /* 60P for the hand: the shutter wanders 290-350 degrees, the blanking keeps it inside the frame */
         CHECK(m60->angle == (BOLEX_60P_ANGLE_MIN + BOLEX_60P_ANGLE_MAX) / 2, "60P middle angle %d", m60->angle);
         {
@@ -255,7 +259,8 @@ int main(void)
 
     /* Up / Down arrows: ISO 100 / 200 / 400, no wrap-around */
     CHECK(bolex_isos[0] == ISO_100 && bolex_isos[1] == ISO_200 && bolex_isos[2] == ISO_400, "ISO list");
-    CHECK(bolex_iso_step(0, 1) == 1 && bolex_iso_step(1, 1) == 2 && bolex_iso_step(2, 1) == 2, "ISO up");
+    CHECK(bolex_isos[6] == ISO_6400 && COUNT(bolex_isos) == 7, "ISO up to 6400");
+    CHECK(bolex_iso_step(0, 1) == 1 && bolex_iso_step(5, 1) == 6 && bolex_iso_step(6, 1) == 6, "ISO up");
     CHECK(bolex_iso_step(2, -1) == 1 && bolex_iso_step(0, -1) == 0, "ISO down");
 
     /* 976p 3x3 readout: 976 picture lines, square pixels, the centre 4:3 recorded */
