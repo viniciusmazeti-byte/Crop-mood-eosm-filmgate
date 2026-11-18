@@ -10,6 +10,7 @@ on:
       - bolex28k
       - bolex1620
       - bolex3
+      - bolex4
   workflow_dispatch:
 
 jobs:

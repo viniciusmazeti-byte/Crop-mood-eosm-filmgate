@@ -63,6 +63,8 @@ python3 tests/extract.py $CR function slim_film_apply > "$OUT/crop_rec_apply_sni
   python3 tests/extract.py $CR line     "#define BOLEX_MODE_SENA"
   python3 tests/extract.py $CR line     "#define BOLEX_MODE_166_16"
   python3 tests/extract.py $CR line     "#define BOLEX_MODE_694_166"
+  python3 tests/extract.py $CR line     "#define BOLEX_MODE_60_43"
+  python3 tests/extract.py $CR line     "#define BOLEX_MODE_48_43"
   python3 tests/extract.py $CR line     "#define BOLEX_MODE_INF"
   python3 tests/extract.py $CR line     "#define BOLEX_MODE_SQUARE"
   python3 tests/extract.py $CR line     "#define BOLEX_PATH_INFINITY"

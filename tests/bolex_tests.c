@@ -192,11 +192,23 @@ int main(void)
         CHECK(bolex_trim_count(times, 100, 1000) == 20, "trim 20 fps %d", bolex_trim_count(times, 100, 1000));
         CHECK(bolex_trim_count(times, 10, 1000) == 10, "short take");
         CHECK(BOLEX_TRIM_MS == 0 && BOLEX_HEAD_MS == 0, "no cuts at the ends");
-        /* INFO twice: QUAD (at power on) -> 1.66 -> 976p 1.66 -> SENA -> QUAD */
+        /* INFO twice: 60P 4:3 -> 48P 4:3 -> 2.8K 1.66 -> SENA -> 60P 4:3; power on in 2.8K 1.66 */
         CHECK(bolex_mode == BOLEX_MODE_166 && COUNT(bolex_cycle) == 4, "start mode / cycle");
-        CHECK(bolex_next_mode(BOLEX_MODE_166) == BOLEX_MODE_976_166 &&
-              bolex_next_mode(BOLEX_MODE_976_166) == BOLEX_MODE_694_166 && bolex_next_mode(BOLEX_MODE_694_166) == BOLEX_MODE_SENA &&
-              bolex_next_mode(BOLEX_MODE_SENA) == BOLEX_MODE_166 && bolex_next_mode(BOLEX_MODE_166_16) == BOLEX_MODE_166, "cycle order");
+        CHECK(bolex_next_mode(BOLEX_MODE_60_43) == BOLEX_MODE_48_43 && bolex_next_mode(BOLEX_MODE_48_43) == BOLEX_MODE_166 &&
+              bolex_next_mode(BOLEX_MODE_166) == BOLEX_MODE_SENA && bolex_next_mode(BOLEX_MODE_SENA) == BOLEX_MODE_60_43 &&
+              bolex_next_mode(BOLEX_MODE_694_166) == BOLEX_MODE_60_43, "cycle order");
+        {
+            const struct bolex_mode * a = &bolex_modes[BOLEX_MODE_60_43], * b = &bolex_modes[BOLEX_MODE_48_43];
+            double fa = 32e6 / ((a->timer_a + 1.0) * (a->timer_b_min + 1.0)), fb = 32e6 / ((b->timer_a + 1.0) * (b->timer_b_min + 1.0));
+            int raw_v = 29 + b->rows;
+            printf("60P 4:3: %.2f fps at its fastest; 48P 4:3: %.3f fps, %d rows, %d lines (%.2f ms) beyond the readout\n",
+                   fa, fb, b->rows, b->timer_b_min - raw_v, (b->timer_b_min - raw_v) * (b->timer_a + 1.0) / 32e3);
+            CHECK(a->readout == BOLEX_RO_694 && a->aspect_x100 == 133 && a->play_fps == 24 && a->angle == 320 && !a->rows && fabs(fa - 60) < 0.05, "60P 4:3");
+            CHECK(b->readout == BOLEX_RO_976 && b->aspect_x100 == 133 && b->play_fps == 24 && b->angle == 133 && b->rows == 950 &&
+                  fabs(fb - 48) < 0.01 && bolex_timer_b_for(b, b->fps_max) == b->timer_b_min && b->fps_min * 10 >= b->fps_max * 9, "48P 4:3");
+            /* more time between frames than dannephoto's 976p readout (RAW_V 0x3ED, Timer B 0x50E, Timer A 0x20F) */
+            CHECK((b->timer_b_min - raw_v) * (b->timer_a + 1.0) >= (0x50E - 0x3ED) * (0x20F + 1.0), "48P margin");
+        }
         /* the 16-bit 1.66 frame: 2032x1224 x 2 bytes at its fastest within ~80 MB/s; 60P its fastest 60 */
         const struct bolex_mode * m16 = &bolex_modes[BOLEX_MODE_166_16], * m60 = &bolex_modes[BOLEX_MODE_694_166];
         double mbs = 2032.0 * 1224 * 2 * m16->fps_max / 1000 / 1e6;
@@ -337,7 +349,7 @@ int main(void)
     for (int mi = 0; mi < BOLEX_MODES; mi++)
     {
         const struct bolex_mode * m = &bolex_modes[mi];
-        int max_y = m->readout == BOLEX_RO_1620 ? 1620 : m->readout == BOLEX_RO_28K ? 1226 : m->readout == BOLEX_RO_694 ? 694 : 976;
+        int max_y = m->readout == BOLEX_RO_1620 ? 1620 : m->readout == BOLEX_RO_28K ? 1226 : m->readout == BOLEX_RO_694 ? 694 : (m->rows ? m->rows : 976);
         int max_x = m->readout == BOLEX_RO_1620 ? 2160 : m->readout == BOLEX_RO_28K ? 2880 : 1736;
         int num = m->aspect_x100 == 133 ? 4 : m->aspect_x100, den = m->aspect_x100 == 133 ? 3 : 100;
         int w = MIN(max_y * num / den, max_x) & ~15;
