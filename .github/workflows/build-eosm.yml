@@ -10,6 +10,7 @@ on:
       - bolex28k
       - bolex1620
       - bolex3
+      - fpsteste
   workflow_dispatch:
 
 jobs:

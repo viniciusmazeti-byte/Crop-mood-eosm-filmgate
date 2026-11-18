@@ -99,7 +99,7 @@ int main(void)
         printf("%s speed: %d..%d fps x1000, largest change per 40 ms %d, %d%% in the low fifth, %d%% in the high\n",
                m->name, lo, hi, maxstep, low * 100 / n, high * 100 / n);
         CHECK(lo < m->fps_min + span / 5 && hi > m->fps_max - span / 10, "%s range used %d..%d", m->name, lo, hi);
-        CHECK(maxstep <= 150, "%s: a jump of %d", m->name, maxstep);
+        CHECK(maxstep <= MAX(150, m->fps_max / 400), "%s: a jump of %d", m->name, maxstep);   /* 0.25% of its speed */
         CHECK(low * 100 / n >= 5 && high * 100 / n >= 5, "%s: range rarely reached", m->name);
     }
 
@@ -192,11 +192,25 @@ int main(void)
         CHECK(bolex_trim_count(times, 100, 1000) == 20, "trim 20 fps %d", bolex_trim_count(times, 100, 1000));
         CHECK(bolex_trim_count(times, 10, 1000) == 10, "short take");
         CHECK(BOLEX_TRIM_MS == 0 && BOLEX_HEAD_MS == 0, "no cuts at the ends");
-        /* INFO twice: QUAD (at power on) -> 1.66 -> 976p 1.66 -> SENA -> QUAD */
-        CHECK(bolex_mode == BOLEX_MODE_166 && COUNT(bolex_cycle) == 4, "start mode / cycle");
-        CHECK(bolex_next_mode(BOLEX_MODE_166) == BOLEX_MODE_976_166 &&
-              bolex_next_mode(BOLEX_MODE_976_166) == BOLEX_MODE_694_166 && bolex_next_mode(BOLEX_MODE_694_166) == BOLEX_MODE_SENA &&
-              bolex_next_mode(BOLEX_MODE_SENA) == BOLEX_MODE_166 && bolex_next_mode(BOLEX_MODE_166_16) == BOLEX_MODE_166, "cycle order");
+        /* INFO twice (the fps test build): 60 (at power on) -> 90 -> 100 -> 120 -> 60, all 3x3 4:3 at 24 */
+        CHECK(bolex_mode == BOLEX_MODE_T60 && COUNT(bolex_cycle) == 4, "start mode / cycle");
+        CHECK(bolex_next_mode(BOLEX_MODE_T60) == BOLEX_MODE_T90 && bolex_next_mode(BOLEX_MODE_T90) == BOLEX_MODE_T100 &&
+              bolex_next_mode(BOLEX_MODE_T100) == BOLEX_MODE_T120 && bolex_next_mode(BOLEX_MODE_T120) == BOLEX_MODE_T60 &&
+              bolex_next_mode(BOLEX_MODE_166) == BOLEX_MODE_T60, "cycle order");
+        {
+            static const int want[] = { 60, 90, 100, 120 };
+            for (int k = 0; k < 4; k++)
+            {
+                const struct bolex_mode * t = &bolex_modes[bolex_cycle[k]];
+                double fmax = 32e6 / ((t->timer_a + 1.0) * (t->timer_b_min + 1.0));
+                int raw_v = 28 + (t->rows ? t->rows : 694);
+                printf("%s: %.2f fps at its fastest, %d rows, Timer B - RAW_V = %d\n", t->name, fmax, raw_v - 28, t->timer_b_min - raw_v);
+                CHECK(fabs(fmax - want[k]) < 0.2 && t->readout == BOLEX_RO_694 && t->aspect_x100 == 133 && t->play_fps == 24 &&
+                      t->angle == 320 && !t->sena && !t->window_x && t->bits == 14, "%s", t->name);
+                CHECK(t->timer_b_min - raw_v >= 303, "%s: the 694 readout's margin", t->name);
+                CHECK(bolex_timer_b_for(t, t->fps_max) == t->timer_b_min && t->fps_min * 10 >= t->fps_max * 9 - 100, "%s range", t->name);
+            }
+        }
         /* the 16-bit 1.66 frame: 2032x1224 x 2 bytes at its fastest within ~80 MB/s; 60P its fastest 60 */
         const struct bolex_mode * m16 = &bolex_modes[BOLEX_MODE_166_16], * m60 = &bolex_modes[BOLEX_MODE_694_166];
         double mbs = 2032.0 * 1224 * 2 * m16->fps_max / 1000 / 1e6;
@@ -337,7 +351,7 @@ int main(void)
     for (int mi = 0; mi < BOLEX_MODES; mi++)
     {
         const struct bolex_mode * m = &bolex_modes[mi];
-        int max_y = m->readout == BOLEX_RO_1620 ? 1620 : m->readout == BOLEX_RO_28K ? 1226 : m->readout == BOLEX_RO_694 ? 694 : 976;
+        int max_y = m->readout == BOLEX_RO_1620 ? 1620 : m->readout == BOLEX_RO_28K ? 1226 : m->readout == BOLEX_RO_694 ? (m->rows ? m->rows : 694) : 976;
         int max_x = m->readout == BOLEX_RO_1620 ? 2160 : m->readout == BOLEX_RO_28K ? 2880 : 1736;
         int num = m->aspect_x100 == 133 ? 4 : m->aspect_x100, den = m->aspect_x100 == 133 ? 3 : 100;
         int w = MIN(max_y * num / den, max_x) & ~15;
