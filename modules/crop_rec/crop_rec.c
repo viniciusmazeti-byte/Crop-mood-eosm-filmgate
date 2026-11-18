@@ -250,7 +250,11 @@ static int bolex_blanking(int tb, int angle, int factor_x1000)
 #define BOLEX_MODE_T90      11
 #define BOLEX_MODE_T100     12
 #define BOLEX_MODE_T120     13
-#define BOLEX_MODES         14
+#define BOLEX_MODE_L352     14  /* fps test, round 3: fewer rows, step by step */
+#define BOLEX_MODE_L600     15
+#define BOLEX_MODE_L500     16
+#define BOLEX_MODE_L400     17
+#define BOLEX_MODES         18
 #define BOLEX_PATH_INFINITY 1       /* the window's path while recording (mlv_lite) */
 #define BOLEX_PATH_SQUARE   2
 /* + the frame recorded (width : height x 100, the full height of the readout; mlv_lite), and a
@@ -273,6 +277,13 @@ static const struct bolex_mode bolex_modes[BOLEX_MODES] = {
     { "T 90 4:3",  BOLEX_RO_694,  0x207, 683,   683,   81000, 89970, 320, 24, 0, 133, 0, 0, 0, 14, 352 }, /* 464x348 of 1736x352 */
     { "T 100 4:3", BOLEX_RO_694,  0x207, 615,   615,   90000, 99900, 320, 24, 0, 133, 0, 0, 0, 14, 284 }, /* 368x276 of 1736x284 */
     { "T 120 4:3", BOLEX_RO_694,  0x207, 512,   512,  108000, 119960, 320, 24, 0, 133, 0, 0, 0, 14, 180 }, /* 240x180 of 1736x180 */
+    /* round 3 (camera test of round 2: T 60 works, 90 / 100 / 120 show nothing and record nothing):
+     * A - fewer rows at 60P's speed (is it the rows or the speed?), then shorter readouts a step
+     * faster each (where does it break?) */
+    { "A 352 60",  BOLEX_RO_694,  0x207, 0x401, 0x401, 54000, 59970, 320, 24, 0, 133, 0, 0, 0, 14, 352 }, /* 464x348 */
+    { "B 600 66",  BOLEX_RO_694,  0x207, 931,   931,   59500, 66030, 320, 24, 0, 133, 0, 0, 0, 14, 600 }, /* 800x600 */
+    { "C 500 74",  BOLEX_RO_694,  0x207, 831,   831,   66560, 73960, 320, 24, 0, 133, 0, 0, 0, 14, 500 }, /* 656x492 */
+    { "D 400 84",  BOLEX_RO_694,  0x207, 731,   731,   75660, 84070, 320, 24, 0, 133, 0, 0, 0, 14, 400 }, /* 528x396 */
 };
 
 /* Sensor test (the eighth mode, last; camera test of "make the infinity fluid"): the window the
@@ -310,10 +321,8 @@ static const int sena_fps[] = { 4, 6, 8, 12 };
 /* the modes INFO twice goes through, in order; the first at every power on (not saved).  The
  * others stay in bolex_modes, out of the cycle (camera test: "keep only QUAD, 1.66, 976p 1.66,
  * Sena") */
-/* fps test, round 2 (camera test of round 1: "none works, the screen goes white with an error
- * and it does not record" - also T 60, which is 60P in 4:3): power on in 2.8K 1.66 (known to work
- * at power on), then the known 60P 1.66, then the four tests, to see where it breaks */
-static const int bolex_cycle[] = { BOLEX_MODE_166, BOLEX_MODE_694_166, BOLEX_MODE_T60, BOLEX_MODE_T90, BOLEX_MODE_T100, BOLEX_MODE_T120 };
+/* fps test, round 3: power on in 2.8K 1.66, then T 60 4:3 (works), then A / B / C / D */
+static const int bolex_cycle[] = { BOLEX_MODE_166, BOLEX_MODE_T60, BOLEX_MODE_L352, BOLEX_MODE_L600, BOLEX_MODE_L500, BOLEX_MODE_L400 };
 static int bolex_mode = BOLEX_MODE_166;
 
 /* the mode after m on INFO twice (bolex_cycle) */
