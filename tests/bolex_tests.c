@@ -74,8 +74,8 @@ int main(void)
     for (int mi = 0; mi < BOLEX_MODES; mi++)
     {
         const struct bolex_mode * m = &bolex_modes[mi];
-        if (m->sena)
-            continue;
+        if (m->sena || m->fps_min == m->fps_max)
+            continue;     /* the fast test modes: one speed */
         int span = m->fps_max - m->fps_min;
         struct bolex_wander w;
         int lo = 999999, hi = 0, maxstep = 0, low = 0, high = 0, n = 0;
@@ -193,11 +193,29 @@ int main(void)
         CHECK(bolex_trim_count(times, 10, 1000) == 10, "short take");
         CHECK(BOLEX_TRIM_MS == 0 && BOLEX_HEAD_MS == 0, "no cuts at the ends");
         /* INFO twice (the fps test build): 60 (at power on) -> 90 -> 100 -> 120 -> 60, all 3x3 4:3 at 24 */
-        CHECK(bolex_mode == BOLEX_MODE_166 && COUNT(bolex_cycle) == 6, "start mode / cycle");
-        CHECK(bolex_next_mode(BOLEX_MODE_166) == BOLEX_MODE_T60 && bolex_next_mode(BOLEX_MODE_T60) == BOLEX_MODE_L352 &&
-              bolex_next_mode(BOLEX_MODE_L352) == BOLEX_MODE_L600 && bolex_next_mode(BOLEX_MODE_L600) == BOLEX_MODE_L500 &&
-              bolex_next_mode(BOLEX_MODE_L500) == BOLEX_MODE_L400 && bolex_next_mode(BOLEX_MODE_L400) == BOLEX_MODE_166 &&
-              bolex_next_mode(BOLEX_MODE_T120) == BOLEX_MODE_166, "cycle order");
+        CHECK(bolex_mode == BOLEX_MODE_166 && COUNT(bolex_cycle) == 7, "start mode / cycle");
+        CHECK(bolex_next_mode(BOLEX_MODE_166) == BOLEX_MODE_T60 && bolex_next_mode(BOLEX_MODE_T60) == BOLEX_MODE_H74 &&
+              bolex_next_mode(BOLEX_MODE_H74) == BOLEX_MODE_H84 && bolex_next_mode(BOLEX_MODE_H84) == BOLEX_MODE_H90 &&
+              bolex_next_mode(BOLEX_MODE_H90) == BOLEX_MODE_H100 && bolex_next_mode(BOLEX_MODE_H100) == BOLEX_MODE_H120 &&
+              bolex_next_mode(BOLEX_MODE_H120) == BOLEX_MODE_166 && bolex_next_mode(BOLEX_MODE_L400) == BOLEX_MODE_166, "cycle order");
+        /* round 4: 60 until recording, then the mode's speed */
+        {
+            static const int fast[] = { BOLEX_MODE_H74, BOLEX_MODE_H84, BOLEX_MODE_H90, BOLEX_MODE_H100, BOLEX_MODE_H120 };
+            static const int want[] = { 74, 84, 90, 100, 120 };
+            for (int k = 0; k < 5; k++)
+            {
+                const struct bolex_mode * t = &bolex_modes[fast[k]];
+                double fidle = 32e6 / ((t->timer_a + 1.0) * (t->timer_b_idle + 1.0));
+                double fmax = 32e6 / ((t->timer_a + 1.0) * (t->timer_b_min + 1.0));
+                int raw_v = 28 + t->rows;
+                printf("%s: %.2f fps idle, %.2f recording, %d rows, margin %d\n", t->name, fidle, fmax, t->rows, t->timer_b_min - raw_v);
+                CHECK(bolex_boost_mode(fast[k]) && fabs(fidle - 60) < 0.1 && fabs(fmax - want[k]) < 0.1 && t->fps_min == t->fps_max &&
+                      bolex_timer_b_for(t, t->fps_max) == t->timer_b_min && t->timer_b_min - raw_v >= 303 &&
+                      t->aspect_x100 == 133 && t->play_fps == 24 && t->bits == 14, "%s", t->name);
+            }
+            CHECK(!bolex_boost_mode(BOLEX_MODE_T60) && !bolex_boost_mode(BOLEX_MODE_694_166) && !bolex_boost_mode(BOLEX_MODE_1620) &&
+                  !bolex_boost_mode(BOLEX_MODE_L600) && BOLEX_BOOST_DELAY_MS >= 500, "only the fast modes boost");
+        }
         {
             static const int want[] = { 60, 90, 100, 120, 60, 66, 74, 84 }, modes[] = { BOLEX_MODE_T60, BOLEX_MODE_T90, BOLEX_MODE_T100, BOLEX_MODE_T120, BOLEX_MODE_L352, BOLEX_MODE_L600, BOLEX_MODE_L500, BOLEX_MODE_L400 };
             for (int k = 0; k < 8; k++)

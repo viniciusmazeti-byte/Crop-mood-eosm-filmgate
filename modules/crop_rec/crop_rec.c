@@ -254,7 +254,12 @@ static int bolex_blanking(int tb, int angle, int factor_x1000)
 #define BOLEX_MODE_L600     15
 #define BOLEX_MODE_L500     16
 #define BOLEX_MODE_L400     17
-#define BOLEX_MODES         18
+#define BOLEX_MODE_H74      18  /* fps test, round 4: start at 60, fast only while recording */
+#define BOLEX_MODE_H84      19
+#define BOLEX_MODE_H90      20
+#define BOLEX_MODE_H100     21
+#define BOLEX_MODE_H120     22
+#define BOLEX_MODES         23
 #define BOLEX_PATH_INFINITY 1       /* the window's path while recording (mlv_lite) */
 #define BOLEX_PATH_SQUARE   2
 /* + the frame recorded (width : height x 100, the full height of the readout; mlv_lite), and a
@@ -284,7 +289,26 @@ static const struct bolex_mode bolex_modes[BOLEX_MODES] = {
     { "B 600 66",  BOLEX_RO_694,  0x207, 931,   931,   59500, 66030, 320, 24, 0, 133, 0, 0, 0, 14, 600 }, /* 800x600 */
     { "C 500 74",  BOLEX_RO_694,  0x207, 831,   831,   66560, 73960, 320, 24, 0, 133, 0, 0, 0, 14, 500 }, /* 656x492 */
     { "D 400 84",  BOLEX_RO_694,  0x207, 731,   731,   75660, 84070, 320, 24, 0, 133, 0, 0, 0, 14, 400 }, /* 528x396 */
+    /* round 4 (camera test of round 3: B 600 rows at 66 works; C 500 at 74 shows a picture but
+     * recording breaks - the picture freezes, things on the screen; D 400 at 84 shows nothing):
+     * the limit is the frame rate, not the rows, so lighten each frame instead.  Not recording:
+     * Timer B 0x401 (60 fps, a picture to frame with).  Recording: the hacks first (no ML preview,
+     * uncompressed 14-bit, no flicker, a fixed shutter; from 90 also Canon's own view stopped,
+     * CartridgeCancel - mlv_lite, bolex_boost 2), then BOLEX_BOOST_DELAY_MS later the fast Timer B */
+    { "H 74",      BOLEX_RO_694,  0x207, 0x401, 831,   73960, 73960, 320, 24, 0, 133, 0, 0, 0, 14, 500 }, /* 656x492 */
+    { "H 84",      BOLEX_RO_694,  0x207, 0x401, 731,   84070, 84070, 320, 24, 0, 133, 0, 0, 0, 14, 400 }, /* 528x396 */
+    { "H 90",      BOLEX_RO_694,  0x207, 0x401, 683,   89970, 89970, 320, 24, 0, 133, 0, 0, 0, 14, 352 }, /* 464x348 */
+    { "H 100",     BOLEX_RO_694,  0x207, 0x401, 615,   99900, 99900, 320, 24, 0, 133, 0, 0, 0, 14, 284 }, /* 368x276 */
+    { "H 120",     BOLEX_RO_694,  0x207, 0x401, 512,  119960, 119960, 320, 24, 0, 133, 0, 0, 0, 14, 180 }, /* 240x180 */
 };
+
+/* the fast modes of round 4: 60 fps until recording, then their speed (see above) */
+#define BOLEX_BOOST_DELAY_MS 1000
+static int bolex_boost_mode(int mi)
+{
+    const struct bolex_mode * m = &bolex_modes[mi];
+    return m->readout == BOLEX_RO_694 && m->rows && m->timer_b_idle > m->timer_b_min;
+}
 
 /* Sensor test (the eighth mode, last; camera test of "make the infinity fluid"): the window the
  * crop cuts can only sit on 8-pixel steps, so try moving the sensor's own readout instead.
@@ -321,8 +345,8 @@ static const int sena_fps[] = { 4, 6, 8, 12 };
 /* the modes INFO twice goes through, in order; the first at every power on (not saved).  The
  * others stay in bolex_modes, out of the cycle (camera test: "keep only QUAD, 1.66, 976p 1.66,
  * Sena") */
-/* fps test, round 3: power on in 2.8K 1.66, then T 60 4:3 (works), then A / B / C / D */
-static const int bolex_cycle[] = { BOLEX_MODE_166, BOLEX_MODE_T60, BOLEX_MODE_L352, BOLEX_MODE_L600, BOLEX_MODE_L500, BOLEX_MODE_L400 };
+/* fps test, round 4: power on in 2.8K 1.66, then T 60 4:3 (works), then H 74 / 84 / 90 / 100 / 120 */
+static const int bolex_cycle[] = { BOLEX_MODE_166, BOLEX_MODE_T60, BOLEX_MODE_H74, BOLEX_MODE_H84, BOLEX_MODE_H90, BOLEX_MODE_H100, BOLEX_MODE_H120 };
 static int bolex_mode = BOLEX_MODE_166;
 
 /* the mode after m on INFO twice (bolex_cycle) */
@@ -1633,6 +1657,12 @@ static void FAST adtg_hook(uint32_t* regs, uint32_t* stack, uint32_t pc)
                 /* assuming FPS timer B was overridden before this */
                 int fps_timer_b = (shamem_read(0xC0F06014) & 0xFFFF) + 1;
                 int readout_end = shamem_read(0xC0F06804) >> 16;    /* fixme: D5 only */
+
+                /* Bolex fps test, round 4: the sensor's wake-up timed for the fast frame from the
+                 * start (Canon may not write these again once the speed goes up while recording);
+                 * at 60 it only wakes earlier than needed */
+                if (bolex_fmt && bolex_boost_mode(bolex_mode))
+                    fps_timer_b = MIN(fps_timer_b, bolex_modes[bolex_mode].timer_b_min + 1);
 
                 /* PowerSaveTiming registers */
                 /* after readout is finished, we can turn off the sensor until the next frame */
@@ -7153,7 +7183,11 @@ static void slim_cover_hold_and_release(int hold_ms)
  * Then the fps test build (branch fpsteste): only T 60 / 90 / 100 / 120 on INFO twice, the 3x3
  * readout of 60P cut to fewer rows so the frame is short enough (1736x352 / 284 / 180), the
  * centre 4:3 recorded (912x684, 464x348, 368x276, 240x180), all played at 24, each with 60P's
- * shutter (290-350 degrees), its flicker x1.6 and no drops.)
+ * shutter (290-350 degrees), its flicker x1.6 and no drops.  Camera: nothing above 60 worked; in
+ * steps, 600 rows at 66 works, 500 at 74 previews but breaks recording, 400 at 84 shows nothing -
+ * the frame rate is the limit, not the rows.  Round 4 (H 74 .. H 120): 60 fps until recording,
+ * then lighter frames (no ML preview, uncompressed, no flicker; from 90 Canon's view stopped)
+ * and only then the fast Timer B.)
  *
  *   4:3  dannephoto's 976p: crop_rec 3x3 "High FPS" 16:9 readout, 1736x976, Canon's x5 state
  *        (3 columns binned, 1 line of 3).  The settings of the user's crop mood setup that gave
@@ -7295,9 +7329,11 @@ static void bolex_speed_task(void)
                 }
                 bolex_timer_b_live = bolex_timer_b_for(m, sena_fps[sena_cur] * 1000);
             }
+            else if (bolex_boost_mode(bolex_mode) && now - bolex_rec_start < BOLEX_BOOST_DELAY_MS)
+                bolex_timer_b_live = m->timer_b_idle;   /* the hacks first (mlv_lite), then fast */
             else
                 bolex_timer_b_live = bolex_timer_b_for(m, bolex_wander_step(&w, dt, m->fps_min, m->fps_max));
-            bolex_angle_live = (bolex_modes[bolex_mode].readout == BOLEX_RO_694)
+            bolex_angle_live = (bolex_modes[bolex_mode].readout == BOLEX_RO_694 && !bolex_boost_mode(bolex_mode))
                 ? bolex_wander_step(&wa, dt, BOLEX_60P_ANGLE_MIN * 1000, BOLEX_60P_ANGLE_MAX * 1000) / 1000 : 0;
         }
         else
@@ -7307,6 +7343,8 @@ static void bolex_speed_task(void)
                 bolex_sensor_delta = bolex_test_base;   /* back to the value set by hand */
                 bolex_test_refresh = 1;
             }
+            if (bolex_rec_start && bolex_boost_mode(bolex_mode))
+                bolex_test_refresh = 1;     /* Canon's view may stay stopped (CartridgeCancel): set it up again */
             bolex_rec_start = 0;
             bolex_angle_live = 0;
             sena_cur = -1;
@@ -7324,7 +7362,7 @@ static unsigned int bolex_vsync_cbr(unsigned int unused)
     if (!bolex_fmt)
         return 0;
     int now = get_ms_clock();
-    if (RECORDING && !bolex_modes[bolex_mode].sena && !bolex_modes[bolex_mode].test)
+    if (RECORDING && !bolex_modes[bolex_mode].sena && !bolex_modes[bolex_mode].test && !bolex_boost_mode(bolex_mode))
     {
         if (!on)
         {
@@ -7398,6 +7436,15 @@ int bolex_infinity()
 int bolex_no_drops()
 {
     return bolex_fmt && bolex_modes[bolex_mode].readout == BOLEX_RO_694;
+}
+
+/* used by mlv_lite: a fast mode of the fps test (round 4): 1 = no ML preview while recording,
+ * uncompressed; 2 = from 90 fps, Canon's view stopped too (CartridgeCancel) */
+int bolex_boost()
+{
+    if (!bolex_fmt || !bolex_boost_mode(bolex_mode))
+        return 0;
+    return bolex_modes[bolex_mode].fps_max >= 89000 ? 2 : 1;
 }
 
 /* used by mlv_lite: the mode records 16-bit uncompressed */

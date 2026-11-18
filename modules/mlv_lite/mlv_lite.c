@@ -2888,7 +2888,8 @@ static void bolex_raw_settings(void)
         return;
 
     raw_video_enabled = 1;
-    output_format = OUTPUT_14BIT_LOSSLESS;
+    /* fps test, round 4: the fast modes uncompressed (no compressor work a frame; small frames) */
+    output_format = bolex_boost() ? OUTPUT_14BIT_NATIVE : OUTPUT_14BIT_LOSSLESS;
 
     /* performance: the user's crop mood setup (photos of its menus; no ML menu here) */
     kill_gd = 0;            /* ON froze the screen while recording (camera test): the Framing
@@ -3255,6 +3256,17 @@ void hack_liveview(int unhack)
                 }
             }
         }
+    }
+
+    /* Bolex fps test, round 4, from 90 fps (crop_rec bolex_boost 2): Canon's own view stopped
+     * while recording (CartridgeCancel, the "All" hack - on the EOS M it freezes the screen,
+     * which is why crop mood keeps it off), so only the raw frames go on.  crop_rec sets the
+     * view up again after the take.  No wait for frames here: they may not come to the screen. */
+    if (!unhack && more_hacks_are_supported && bolex_format() && bolex_boost() == 2)
+    {
+        lvfaceEnd();
+        aewbSuspend();
+        CartridgeCancel();
     }
 }
 
@@ -5852,6 +5864,10 @@ static int raw_rec_should_preview(void)
 {
     if (!raw_video_enabled) return 0;
     if (!is_movie_mode()) return 0;
+
+    /* Bolex fps test, round 4: no ML preview while recording a fast mode (less work a frame) */
+    if (bolex_format() && bolex_boost() && RAW_IS_RECORDING)
+        return 0;
 
     /* Dual ISO Normal: Canon preview when idle; avoid striped raw preview while recording. */
     if (dual_iso_skip_raw_preview())
