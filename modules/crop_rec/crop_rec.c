@@ -310,8 +310,11 @@ static const int sena_fps[] = { 4, 6, 8, 12 };
 /* the modes INFO twice goes through, in order; the first at every power on (not saved).  The
  * others stay in bolex_modes, out of the cycle (camera test: "keep only QUAD, 1.66, 976p 1.66,
  * Sena") */
-static const int bolex_cycle[] = { BOLEX_MODE_T60, BOLEX_MODE_T90, BOLEX_MODE_T100, BOLEX_MODE_T120 };
-static int bolex_mode = BOLEX_MODE_T60;
+/* fps test, round 2 (camera test of round 1: "none works, the screen goes white with an error
+ * and it does not record" - also T 60, which is 60P in 4:3): power on in 2.8K 1.66 (known to work
+ * at power on), then the known 60P 1.66, then the four tests, to see where it breaks */
+static const int bolex_cycle[] = { BOLEX_MODE_166, BOLEX_MODE_694_166, BOLEX_MODE_T60, BOLEX_MODE_T90, BOLEX_MODE_T100, BOLEX_MODE_T120 };
+static int bolex_mode = BOLEX_MODE_166;
 
 /* the mode after m on INFO twice (bolex_cycle) */
 static int bolex_next_mode(int m)

@@ -193,15 +193,16 @@ int main(void)
         CHECK(bolex_trim_count(times, 10, 1000) == 10, "short take");
         CHECK(BOLEX_TRIM_MS == 0 && BOLEX_HEAD_MS == 0, "no cuts at the ends");
         /* INFO twice (the fps test build): 60 (at power on) -> 90 -> 100 -> 120 -> 60, all 3x3 4:3 at 24 */
-        CHECK(bolex_mode == BOLEX_MODE_T60 && COUNT(bolex_cycle) == 4, "start mode / cycle");
-        CHECK(bolex_next_mode(BOLEX_MODE_T60) == BOLEX_MODE_T90 && bolex_next_mode(BOLEX_MODE_T90) == BOLEX_MODE_T100 &&
-              bolex_next_mode(BOLEX_MODE_T100) == BOLEX_MODE_T120 && bolex_next_mode(BOLEX_MODE_T120) == BOLEX_MODE_T60 &&
-              bolex_next_mode(BOLEX_MODE_166) == BOLEX_MODE_T60, "cycle order");
+        CHECK(bolex_mode == BOLEX_MODE_166 && COUNT(bolex_cycle) == 6, "start mode / cycle");
+        CHECK(bolex_next_mode(BOLEX_MODE_166) == BOLEX_MODE_694_166 && bolex_next_mode(BOLEX_MODE_694_166) == BOLEX_MODE_T60 &&
+              bolex_next_mode(BOLEX_MODE_T60) == BOLEX_MODE_T90 && bolex_next_mode(BOLEX_MODE_T90) == BOLEX_MODE_T100 &&
+              bolex_next_mode(BOLEX_MODE_T100) == BOLEX_MODE_T120 && bolex_next_mode(BOLEX_MODE_T120) == BOLEX_MODE_166 &&
+              bolex_next_mode(BOLEX_MODE_SENA) == BOLEX_MODE_166, "cycle order");
         {
             static const int want[] = { 60, 90, 100, 120 };
             for (int k = 0; k < 4; k++)
             {
-                const struct bolex_mode * t = &bolex_modes[bolex_cycle[k]];
+                const struct bolex_mode * t = &bolex_modes[bolex_cycle[k + 2]];
                 double fmax = 32e6 / ((t->timer_a + 1.0) * (t->timer_b_min + 1.0));
                 int raw_v = 28 + (t->rows ? t->rows : 694);
                 printf("%s: %.2f fps at its fastest, %d rows, Timer B - RAW_V = %d\n", t->name, fmax, raw_v - 28, t->timer_b_min - raw_v);
